@@ -361,23 +361,28 @@ const App: React.FC = () => {
                   )}
 
                   {activeMessages.map((msg) => (
-                    <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                      <div className={`group relative max-w-[90%] md:max-w-[80%] p-6 rounded-[2rem] ${msg.role === 'user' ? 'bg-white text-black font-bold italic' : 'glass-panel text-gray-100 border-white/10 shadow-2xl backdrop-blur-2xl'
+                    <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'} gap-2`}>
+
+                      {/* USER SENT IMAGES (Outside Bubble) */}
+                      {msg.role === 'user' && msg.images && msg.images.length > 0 && (
+                        <div className="flex flex-wrap gap-2 justify-end max-w-[80%] mb-1">
+                          {msg.images.map((img, idx) => (
+                            <div key={idx} className="relative w-24 h-24 shrink-0 overflow-hidden rounded-xl border-2 border-white/10 shadow-lg">
+                              <img src={img} className="w-full h-full object-cover" />
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className={`group relative max-w-[90%] md:max-w-[80%] p-5 rounded-2xl shadow-xl ${msg.role === 'user'
+                          ? 'bg-white text-black font-bold italic'
+                          : 'glass-panel text-gray-100 border border-white/5 backdrop-blur-3xl'
                         }`}>
+
                         {msg.role === 'assistant' && (
                           <div className="flex items-center gap-2 mb-4 opacity-50">
                             <ShieldCheck className="w-3 h-3" />
                             <span className="text-[9px] font-black uppercase tracking-[0.2em]">Synthesis</span>
-                          </div>
-                        )}
-
-                        {msg.images && msg.images.length > 0 && (
-                          <div className="flex flex-wrap gap-2 mb-4">
-                            {msg.images.map((img, idx) => (
-                              <div key={idx} className="relative w-20 h-20 shrink-0 overflow-hidden rounded-lg border border-black/10">
-                                <img src={img} className="w-full h-full object-cover" />
-                              </div>
-                            ))}
                           </div>
                         )}
 
