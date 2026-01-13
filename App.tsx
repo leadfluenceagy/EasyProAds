@@ -375,8 +375,8 @@ const App: React.FC = () => {
                       )}
 
                       <div className={`group relative max-w-[90%] md:max-w-[80%] p-5 rounded-2xl shadow-xl ${msg.role === 'user'
-                          ? 'bg-white text-black font-bold italic'
-                          : 'glass-panel text-gray-100 border border-white/5 backdrop-blur-3xl'
+                        ? 'bg-white text-black font-medium'
+                        : 'glass-panel text-gray-100 border border-white/5 backdrop-blur-3xl'
                         }`}>
 
                         {msg.role === 'assistant' && (
