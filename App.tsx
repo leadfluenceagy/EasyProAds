@@ -158,10 +158,7 @@ const App: React.FC = () => {
     };
     const assistantMsgId = (Date.now() + 1).toString();
 
-    const assistantStatusText =
-      currentMode === 'generator' ? 'Synthesizing product environment...' :
-        currentMode === 'iteration' ? 'Replicating composition and lighting...' :
-          'Analyzing facial identity and fashion context...';
+    const assistantStatusText = "Understanding request and analyzing inputs...";
 
     setMessagesByMode(prev => ({
       ...prev,
@@ -183,29 +180,33 @@ const App: React.FC = () => {
         [currentMode]: { ...prev[currentMode], [assistantMsgId]: optimizedPrompt }
       }));
 
+      // STEP 2: Prompt Developed
       setMessagesByMode(prev => ({
         ...prev,
         [currentMode]: prev[currentMode].map(m =>
           m.id === assistantMsgId
-            ? { ...m, content: `Prompt Optimized.\n\nExecuting 4K rendering...`, status: 'generating' }
+            ? { ...m, content: `Strategy Developed.\n\nRendering 8K Resolution...`, status: 'generating' }
             : m
         )
       }));
 
-      const imageUrl916 = await generateImage(optimizedPrompt, '9:16', currentImgs);
+      const finalImageUrl = await generateImage(optimizedPrompt, '9:16', currentImgs);
 
-      setHistory(prev => [{
+      setHistory(prev => [...prev, {
         id: Date.now().toString(),
-        url: imageUrl916,
+        url: finalImageUrl,
         prompt: optimizedPrompt,
-        originalIdea: query,
-        aspectRatio: '9:16',
         timestamp: Date.now(),
-      }, ...prev]);
+        aspectRatio: '9:16'
+      }]);
 
       setMessagesByMode(prev => ({
         ...prev,
-        [currentMode]: prev[currentMode].map(m => m.id === assistantMsgId ? { ...m, content: optimizedPrompt, status: 'done' } : m)
+        [currentMode]: prev[currentMode].map(m =>
+          m.id === assistantMsgId
+            ? { ...m, status: 'done', content: "Generation Complete.\nviewing result below." } // HIDE PROMPT
+            : m
+        )
       }));
 
     } catch (error: any) {
