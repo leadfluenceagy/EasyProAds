@@ -315,6 +315,11 @@ const App: React.FC = () => {
                       <h2 className="text-3xl font-black text-white tracking-tighter uppercase">
                         {activeMode === 'generator' ? 'Product Scene' : activeMode === 'iteration' ? 'Reference Copy' : 'Fashion Edit'}
                       </h2>
+                      <p className="text-gray-500 max-w-md mx-auto text-sm font-medium tracking-tight leading-relaxed">
+                        {activeMode === 'generator' ? 'Add a product (preferably PNG) and provide a brief description of how you want to adapt it to a background.' :
+                          activeMode === 'iteration' ? 'Add a reference ad and the product you want to insert. This will create the same ad but with your desired product. IMPORTANT: All text will be removed.' :
+                            'Iterate fashion models preserving identity and realism.'}
+                      </p>
                     </div>
                   )}
 
