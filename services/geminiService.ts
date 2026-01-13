@@ -30,25 +30,27 @@ CRITICAL CONSTRAINTS:
 // Fix: Follow GoogleGenAI initialization guidelines and ensure correct model usage
 export const professionalizePrompt = async (input: string, mode: ChatMode, imagesBase64: string[] = []): Promise<string> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  
+
   let systemInstruction = GENERATOR_PROMPT;
   if (mode === 'iteration') systemInstruction = ITERATION_PROMPT;
   if (mode === 'fashion') systemInstruction = FASHION_PROMPT;
-  
+
   const parts: Part[] = [
-    { text: mode === 'fashion' 
-        ? `Fashion Iteration Request: "${input}". Focus on identity preservation and high-end editorial quality.` 
+    {
+      text: mode === 'fashion'
+        ? `Fashion Iteration Request: "${input}". Focus on identity preservation and high-end editorial quality.`
         : mode === 'iteration'
-        ? `Ad Re-composition Request: "${input}". Match reference style perfectly.`
-        : `Environment Synthesis Request: "${input}"` 
+          ? `Ad Re-composition Request: "${input}". Match reference style perfectly.`
+          : `Environment Synthesis Request: "${input}"`
     }
   ];
-  
+
   imagesBase64.forEach(img => {
+    const mimeType = img.match(/^data:(image\/[a-zA-Z+]+);base64,/)?.[1] || 'image/png';
     parts.push({
       inlineData: {
         data: img.split(',')[1] || img,
-        mimeType: 'image/png'
+        mimeType: mimeType
       }
     });
   });
@@ -68,14 +70,15 @@ export const professionalizePrompt = async (input: string, mode: ChatMode, image
 // Fix: Ensure proper image generation model usage and output extraction
 export const generateImage = async (prompt: string, aspectRatio: AspectRatio, referenceImages: string[] = []): Promise<string> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  
+
   const parts: Part[] = [{ text: prompt }];
-  
+
   referenceImages.forEach((img) => {
+    const mimeType = img.match(/^data:(image\/[a-zA-Z+]+);base64,/)?.[1] || 'image/png';
     parts.unshift({
       inlineData: {
         data: img.split(',')[1] || img,
-        mimeType: 'image/png'
+        mimeType: mimeType
       }
     });
   });

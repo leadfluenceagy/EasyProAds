@@ -105,6 +105,29 @@ const App: React.FC = () => {
     e.target.value = '';
   };
 
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const files = Array.from(e.dataTransfer.files) as File[];
+      files.forEach(file => {
+        if (file.type.startsWith('image/')) {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            setSelectedImages(prev => [...prev, reader.result as string]);
+          };
+          reader.readAsDataURL(file);
+        }
+      });
+    }
+  };
+
   const removeSelectedImage = (index: number) => {
     setSelectedImages(prev => prev.filter((_, i) => i !== index));
   };
@@ -124,7 +147,15 @@ const App: React.FC = () => {
     if (currentView !== 'workspace') setCurrentView('workspace');
 
     const currentMode = activeMode;
+    const currentImgs = [...selectedImages]; // Capture images FIRST
     const userMsgId = Date.now().toString();
+    const newMessage: ChatMessage = {
+      id: userMsgId,
+      role: 'user',
+      content: query || "Visual synthesis request...",
+      mode: currentMode,
+      images: [...currentImgs]
+    };
     const assistantMsgId = (Date.now() + 1).toString();
 
     const assistantStatusText =
@@ -135,12 +166,11 @@ const App: React.FC = () => {
     setMessagesByMode(prev => ({
       ...prev,
       [currentMode]: [...prev[currentMode],
-      { id: userMsgId, role: 'user', content: query || "Visual synthesis request...", mode: currentMode },
+        newMessage,
       { id: assistantMsgId, role: 'assistant', content: assistantStatusText, status: 'processing', mode: currentMode }
       ]
     }));
 
-    const currentImgs = [...selectedImages];
     setInputText('');
     setSelectedImages([]);
     setIsProcessing(true);
@@ -300,12 +330,19 @@ const App: React.FC = () => {
         )}
 
         {/* CONTENT VIEWS */}
-        <div className="flex-1 relative overflow-hidden bg-[radial-gradient(circle_at_50%_-20%,_#1a1025_0%,_#020202_70%)]">
+        <div
+          className="flex-1 relative overflow-hidden bg-[radial-gradient(circle_at_50%_-20%,_#1a1025_0%,_#020202_70%)]"
+          onDragOver={handleDragOver}
+          onDragEnter={handleDragOver}
+          onDrop={handleDrop}
+        >
 
           {/* VIEW: WORKSPACE */}
           {currentView === 'workspace' && (
             <>
-              <div className="absolute inset-0 overflow-y-auto p-4 md:p-8 pt-6 chat-container pb-32">
+              <div
+                className="absolute inset-0 overflow-y-auto p-4 md:p-8 pt-6 chat-container pb-32"
+              >
                 <div className="max-w-4xl mx-auto space-y-12">
                   {activeMessages.length === 0 && (
                     <div className="h-full flex flex-col items-center justify-center py-20 text-center space-y-8 opacity-50">
@@ -333,6 +370,17 @@ const App: React.FC = () => {
                             <span className="text-[9px] font-black uppercase tracking-[0.2em]">Synthesis</span>
                           </div>
                         )}
+
+                        {msg.images && msg.images.length > 0 && (
+                          <div className="flex flex-wrap gap-2 mb-4">
+                            {msg.images.map((img, idx) => (
+                              <div key={idx} className="relative w-20 h-20 shrink-0 overflow-hidden rounded-lg border border-black/10">
+                                <img src={img} className="w-full h-full object-cover" />
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
                         <p className={`whitespace-pre-wrap leading-relaxed ${msg.role === 'user' ? 'text-lg' : 'text-sm font-mono text-gray-300'}`}>
                           {msg.content}
                         </p>

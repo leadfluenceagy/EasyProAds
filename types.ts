@@ -18,4 +18,5 @@ export interface ChatMessage {
   content: string;
   status?: 'processing' | 'generating' | 'done' | 'error';
   mode?: ChatMode;
+  images?: string[];
 }
