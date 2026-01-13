@@ -348,7 +348,7 @@ const App: React.FC = () => {
                                   <span className="text-[9px] font-black text-purple-400 uppercase tracking-widest">9:16 Format</span>
                                   <div className="overflow-hidden rounded-xl border border-white/10 relative group-img">
                                     <img src={img916.url} className="w-full h-auto" />
-                                    <button onClick={() => downloadImage(img916.url, img916.id)} className="absolute top-2 right-2 p-2 bg-black/50 text-white rounded-lg opacity-0 group-img-hover:opacity-100 transition-opacity">
+                                    <button onClick={() => downloadImage(img916.url, img916.id)} className="absolute top-2 right-2 p-2 bg-black/50 text-white rounded-lg hover:bg-black/70 transition-colors">
                                       <Download className="w-4 h-4" />
                                     </button>
                                   </div>
