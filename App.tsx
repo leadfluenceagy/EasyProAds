@@ -315,10 +315,10 @@ const App: React.FC = () => {
                       <h2 className="text-3xl font-black text-white tracking-tighter uppercase">
                         {activeMode === 'generator' ? 'Product Scene' : activeMode === 'iteration' ? 'Reference Copy' : 'Fashion Edit'}
                       </h2>
-                      <p className="text-gray-500 max-w-md mx-auto text-sm font-medium tracking-tight leading-relaxed">
-                        {activeMode === 'generator' ? 'Add a product (preferably PNG) and provide a brief description of how you want to adapt it to a background.' :
-                          activeMode === 'iteration' ? 'Add a reference ad and the product you want to insert. This will create the same ad but with your desired product. IMPORTANT: All text will be removed.' :
-                            'Iterate fashion models preserving identity and realism.'}
+                      <p className="text-gray-500 max-w-lg mx-auto text-sm font-medium tracking-tight leading-relaxed">
+                        {activeMode === 'generator' ? 'Añade un producto preferiblemente en png y dale una breve descripción de cómo quieres adaptarlo a qué fondo.' :
+                          activeMode === 'iteration' ? 'Añade un anuncio de referencia y añade el producto que quieras meter en ese anuncio. De esta forma tendrás el mismo anuncio pero con tu producto deseado. IMPORTANTE: Todo el texto se elimina.' :
+                            'Primero pasa una foto de la cara de la modelo, luego pasa la foto de moda que quieras iterar.\nEJ: Meto la cara de la de Milan y meto una foto de ella llevando el vestido, le digo que cambie la pose y que el fondo sea en una casa con una piscina infinita.'}
                       </p>
                     </div>
                   )}
