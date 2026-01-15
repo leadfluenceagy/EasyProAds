@@ -41,6 +41,7 @@ export const Feedback: React.FC = () => {
             }));
 
             console.log('Formatted list for UI:', formattedData);
+            console.log('TOTAL FEEDBACKS COUNT:', formattedData.length);
             setFeedbacks(formattedData);
         } catch (err) {
             console.error('Error fetching feedbacks:', err);
