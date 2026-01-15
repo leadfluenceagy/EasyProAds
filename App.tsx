@@ -3,6 +3,7 @@ import { ChatMessage, GeneratedImage, AspectRatio, ChatMode } from './types';
 import { professionalizePrompt, generateImage } from './services/geminiService';
 import { supabase } from './services/supabase';
 import { Auth } from './components/Auth';
+import { Feedback } from './components/Feedback';
 import { Session } from '@supabase/supabase-js';
 import {
   Send,
@@ -21,7 +22,8 @@ import {
   Repeat,
   Layers,
   Settings,
-  LogOut
+  LogOut,
+  MessageSquare
 } from 'lucide-react';
 
 // Fix: Use explicit global declaration for aistudio to avoid type conflicts and resolve Blob error
@@ -35,7 +37,7 @@ declare global {
   }
 }
 
-type View = 'workspace' | 'gallery' | 'settings';
+type View = 'workspace' | 'gallery' | 'settings' | 'feedback';
 
 const App: React.FC = () => {
   const [session, setSession] = useState<Session | null>(null);
@@ -301,6 +303,15 @@ const App: React.FC = () => {
 
           <div className="flex-1 flex flex-col justify-end p-4 gap-2">
             <button
+              onClick={() => setCurrentView('feedback')}
+              className={`flex items-center gap-3 px-4 py-4 rounded-2xl transition-all font-bold text-[11px] uppercase tracking-tight group ${currentView === 'feedback' ? 'bg-white text-black shadow-lg' : 'hover:bg-white/5 text-gray-400'
+                }`}
+            >
+              <MessageSquare className="w-6 h-6 shrink-0" />
+              <span className="hidden lg:block">Feedback</span>
+            </button>
+
+            <button
               onClick={() => setCurrentView('workspace')}
               className={`flex items-center gap-3 px-4 py-4 rounded-2xl transition-all font-bold text-[11px] uppercase tracking-tight group ${currentView === 'workspace' ? 'bg-white text-black shadow-lg' : 'hover:bg-white/5 text-gray-400'
                 }`}
@@ -564,6 +575,11 @@ const App: React.FC = () => {
               <h2 className="text-4xl font-black uppercase tracking-tighter text-white/40">Settings</h2>
               <p className="text-sm font-bold tracking-widest mt-2 uppercase">Coming Soon</p>
             </div>
+          )}
+
+          {/* VIEW: FEEDBACK */}
+          {currentView === 'feedback' && (
+            <Feedback />
           )}
 
         </div>
