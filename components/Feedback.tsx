@@ -21,11 +21,21 @@ export const Feedback: React.FC = () => {
         try {
             const { data, error } = await supabase
                 .from('feedbacks')
-                .select('*')
+                .select(`
+                    *,
+                    profiles (
+                        username
+                    )
+                `)
                 .order('created_at', { ascending: false });
 
             if (error) throw error;
-            setFeedbacks(data || []);
+            // Handle the type cast for the joined profile data
+            const formattedData = (data as any[]).map(item => ({
+                ...item,
+                username: item.profiles?.username || 'Anonymous'
+            }));
+            setFeedbacks(formattedData);
         } catch (err) {
             console.error('Error fetching feedbacks:', err);
         } finally {
@@ -124,9 +134,9 @@ export const Feedback: React.FC = () => {
                             <div key={f.id} className="glass-panel border border-white/5 bg-white/5 p-6 rounded-2xl hover:border-white/10 transition-colors">
                                 <div className="flex items-start justify-between mb-3">
                                     <h4 className="font-bold text-white text-lg">{f.title}</h4>
-                                    <div className="flex items-center gap-2 text-[10px] text-gray-500 bg-white/5 px-3 py-1 rounded-full uppercase font-black">
-                                        <User className="w-3 h-3" />
-                                        User
+                                    <div className="flex items-center gap-2 text-[10px] text-gray-400 bg-white/5 px-3 py-1 rounded-full uppercase font-black">
+                                        <User className="w-3 h-3 text-purple-400" />
+                                        {(f as any).username}
                                     </div>
                                 </div>
                                 <p className="text-sm text-gray-400 leading-relaxed whitespace-pre-wrap">{f.description}</p>
