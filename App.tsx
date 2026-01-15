@@ -25,7 +25,8 @@ import {
   Settings as SettingsIcon,
   LogOut,
   MessageSquare,
-  User
+  User,
+  ChevronDown
 } from 'lucide-react';
 
 // Fix: Use explicit global declaration for aistudio to avoid type conflicts and resolve Blob error
@@ -44,6 +45,7 @@ type View = 'workspace' | 'gallery' | 'settings' | 'feedback';
 const App: React.FC = () => {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
 
   useEffect(() => {
     // Escuchar cambios de autenticación
@@ -64,6 +66,23 @@ const App: React.FC = () => {
 
     return () => subscription.unsubscribe();
   }, []);
+
+  // Handle click outside to close user menu
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (userMenuOpen && !target.closest('.user-menu-container')) {
+        setUserMenuOpen(false);
+      }
+    };
+
+    if (userMenuOpen) {
+      window.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      window.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [userMenuOpen]);
 
   // Navigation State
   const [currentView, setCurrentView] = useState<View>('workspace');
@@ -340,13 +359,43 @@ const App: React.FC = () => {
               <span className="hidden lg:block">Settings</span>
             </button>
 
-            <button
-              onClick={() => supabase.auth.signOut()}
-              className="flex items-center gap-3 px-4 py-4 rounded-2xl transition-all font-bold text-[11px] uppercase tracking-tight group hover:bg-red-500/10 text-gray-400 hover:text-red-400 mt-2"
-            >
-              <LogOut className="w-6 h-6 shrink-0" />
-              <span className="hidden lg:block">Sign Out</span>
-            </button>
+
+            {/* USER MENU DROPDOWN */}
+            <div className="p-4 border-t border-white/5 relative user-menu-container">
+              {userMenuOpen && (
+                <div className="absolute bottom-full left-4 right-4 mb-2 glass-panel bg-[#121212] border border-white/10 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-200 z-50">
+                  <button
+                    onClick={async () => {
+                      await supabase.auth.signOut();
+                      setUserMenuOpen(false);
+                    }}
+                    className="w-full flex items-center gap-3 px-4 py-4 text-red-400 hover:bg-white/5 transition-colors font-bold text-[11px] uppercase tracking-tight"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    Sign Out
+                  </button>
+                </div>
+              )}
+
+              <button
+                onClick={() => setUserMenuOpen(!userMenuOpen)}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all group border border-transparent ${userMenuOpen ? 'bg-white/10 border-white/10' : 'hover:bg-white/5'
+                  }`}
+              >
+                <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-purple-500/20 to-blue-500/20 flex items-center justify-center border border-white/10 shrink-0">
+                  <User className="w-4 h-4 text-purple-400" />
+                </div>
+                <div className="flex-1 text-left hidden lg:block overflow-hidden leading-tight">
+                  <p className="text-[11px] font-black uppercase tracking-tight truncate text-white">
+                    {session?.user?.user_metadata?.username || 'User Profile'}
+                  </p>
+                  <p className="text-[9px] font-bold text-gray-500 truncate lowercase">
+                    {session?.user?.email}
+                  </p>
+                </div>
+                <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform hidden lg:block ${userMenuOpen ? 'rotate-180' : ''}`} />
+              </button>
+            </div>
           </div>
         </div>
       </aside>
