@@ -32,16 +32,10 @@ export const Feedback: React.FC = () => {
 
             if (error) throw error;
             // Handle the type cast for the joined profile data
-            console.log('--- FETCH FEEDBACKS DEBUG ---');
-            console.log('Raw data from DB:', data);
-
             const formattedData = (data || []).map((item: any) => ({
                 ...item,
                 username: item.profiles?.username || 'Anonymous'
             }));
-
-            console.log('Formatted list for UI:', formattedData);
-            console.log('TOTAL FEEDBACKS COUNT:', formattedData.length);
             setFeedbacks(formattedData);
         } catch (err) {
             console.error('Error fetching feedbacks:', err);
@@ -70,13 +64,7 @@ export const Feedback: React.FC = () => {
                 ])
                 .select();
 
-            console.log('Insert response:', { insertData, error });
             if (error) throw error;
-
-            if (!insertData || insertData.length === 0) {
-                console.warn('Insert completed but NO data returned. RLS is likely BLOCKING the write.');
-                throw new Error('Permisos insuficientes: Supabase bloqueó el envío. ¿Ejecutaste el SQL de permisos?');
-            }
 
             setTitle('');
             setDescription('');
