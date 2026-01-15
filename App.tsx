@@ -50,7 +50,6 @@ const App: React.FC = () => {
   useEffect(() => {
     // Escuchar cambios de autenticación
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      console.log('Auth change event:', _event, session?.user?.email);
       setSession(session);
       setLoading(false);
     });
