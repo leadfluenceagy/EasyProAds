@@ -16,6 +16,7 @@ export const Feedback: React.FC = () => {
     const [feedbacks, setFeedbacks] = useState<FeedbackItem[]>([]);
     const [loading, setLoading] = useState(false);
     const [fetching, setFetching] = useState(true);
+    const [success, setSuccess] = useState(false);
 
     const fetchFeedbacks = async () => {
         try {
@@ -31,7 +32,7 @@ export const Feedback: React.FC = () => {
 
             if (error) throw error;
             // Handle the type cast for the joined profile data
-            const formattedData = (data as any[]).map(item => ({
+            const formattedData = (data || []).map((item: any) => ({
                 ...item,
                 username: item.profiles?.username || 'Anonymous'
             }));
@@ -66,6 +67,8 @@ export const Feedback: React.FC = () => {
 
             setTitle('');
             setDescription('');
+            setSuccess(true);
+            setTimeout(() => setSuccess(false), 5000);
             await fetchFeedbacks();
         } catch (err: any) {
             alert('Error sending feedback: ' + err.message);
@@ -105,6 +108,12 @@ export const Feedback: React.FC = () => {
                             required
                         />
                     </div>
+                    {success && (
+                        <div className="p-4 bg-green-500/10 border border-green-500/20 rounded-xl text-green-400 text-xs font-bold text-center animate-in fade-in zoom-in duration-300">
+                            ¡Feedback enviado con éxito! Ya aparece en el muro de abajo.
+                        </div>
+                    )}
+
                     <button
                         type="submit"
                         disabled={loading}
