@@ -14,14 +14,22 @@ export const Settings: React.FC<SettingsProps> = ({ session }) => {
 
     const handleUpdateProfile = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!newUsername.trim()) return;
+        const cleanUsername = newUsername.trim();
+        if (!cleanUsername) return;
+
         setUpdateStatus('loading');
         setErrText('');
 
         try {
+            // 0. Verify session is still valid
+            const { data: { user }, error: userError } = await supabase.auth.getUser();
+            if (userError || !user) {
+                throw new Error('Your session has expired or is invalid. Please sign out and sign in again.');
+            }
+
             // 1. Update auth metadata
             const { error: authError } = await supabase.auth.updateUser({
-                data: { username: newUsername.trim() }
+                data: { username: cleanUsername }
             });
             if (authError) throw authError;
 
@@ -29,18 +37,27 @@ export const Settings: React.FC<SettingsProps> = ({ session }) => {
             const { error: profileError } = await supabase
                 .from('profiles')
                 .upsert({
-                    id: session?.user?.id,
-                    username: newUsername.trim(),
-                    email: session?.user?.email
+                    id: user.id,
+                    username: cleanUsername,
+                    email: user.email
                 }, { onConflict: 'id' });
 
-            if (profileError) throw profileError;
+            if (profileError) {
+                // If it's a constraint error, it's likely the username is taken
+                if (profileError.code === '23505') {
+                    throw new Error('This username is already taken. Please choose another one.');
+                }
+                throw profileError;
+            }
 
             setUpdateStatus('success');
             setTimeout(() => setUpdateStatus('idle'), 3000);
         } catch (err: any) {
+            console.error('Profile update error:', err);
             setUpdateStatus('error');
-            setErrText(err.message);
+            setErrText(err.message || 'An unexpected error occurred');
+        } finally {
+            // Loading state is handled by updateStatus
         }
     };
 
