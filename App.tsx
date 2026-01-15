@@ -1,6 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ChatMessage, GeneratedImage, AspectRatio, ChatMode } from './types';
 import { professionalizePrompt, generateImage } from './services/geminiService';
+import { supabase } from './services/supabase';
+import { Auth } from './components/Auth';
+import { Session } from '@supabase/supabase-js';
 import {
   Send,
   Sparkles,
@@ -17,7 +20,8 @@ import {
   LayoutGrid,
   Repeat,
   Layers,
-  Settings
+  Settings,
+  LogOut
 } from 'lucide-react';
 
 // Fix: Use explicit global declaration for aistudio to avoid type conflicts and resolve Blob error
@@ -34,6 +38,29 @@ declare global {
 type View = 'workspace' | 'gallery' | 'settings';
 
 const App: React.FC = () => {
+  const [session, setSession] = useState<Session | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    // Escuchar cambios de autenticación
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      console.log('Auth change event:', _event, session?.user?.email);
+      setSession(session);
+      setLoading(false);
+    });
+
+    // Comprobar sesión inicial
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setLoading(false);
+    }).catch(err => {
+      console.error('Session check error:', err);
+      setLoading(false);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
   // Navigation State
   const [currentView, setCurrentView] = useState<View>('workspace');
   const [activeMode, setActiveMode] = useState<ChatMode>('generator');
@@ -64,7 +91,6 @@ const App: React.FC = () => {
 
   const activeMessages = messagesByMode[activeMode];
 
-  // Fix: Ensure API key check handles potential unknown return value correctly to resolve line 94 error
   useEffect(() => {
     const checkApiKey = async () => {
       try {
@@ -76,15 +102,6 @@ const App: React.FC = () => {
     };
     checkApiKey();
   }, []);
-
-  const handleOpenKeySelection = async () => {
-    try {
-      await window.aistudio?.openSelectKey();
-      setHasKey(true);
-    } catch (e) {
-      console.error(e);
-    }
-  };
 
   useEffect(() => {
     if (currentView === 'workspace') {
@@ -143,11 +160,10 @@ const App: React.FC = () => {
     const query = text || inputText;
     if ((!query.trim() && selectedImages.length === 0) || isProcessing) return;
 
-    // Force view to workspace if sending a message
     if (currentView !== 'workspace') setCurrentView('workspace');
 
     const currentMode = activeMode;
-    const currentImgs = [...selectedImages]; // Capture images FIRST
+    const currentImgs = [...selectedImages];
     const userMsgId = Date.now().toString();
     const newMessage: ChatMessage = {
       id: userMsgId,
@@ -180,7 +196,6 @@ const App: React.FC = () => {
         [currentMode]: { ...prev[currentMode], [assistantMsgId]: optimizedPrompt }
       }));
 
-      // STEP 2: Prompt Developed
       setMessagesByMode(prev => ({
         ...prev,
         [currentMode]: prev[currentMode].map(m =>
@@ -204,7 +219,7 @@ const App: React.FC = () => {
         ...prev,
         [currentMode]: prev[currentMode].map(m =>
           m.id === assistantMsgId
-            ? { ...m, status: 'done', content: "Generation Complete.\nviewing result below." } // HIDE PROMPT
+            ? { ...m, status: 'done', content: "Generation Complete.\nviewing result below." }
             : m
         )
       }));
@@ -259,6 +274,19 @@ const App: React.FC = () => {
     }
   };
 
+  if (loading) {
+    return (
+      <div className="h-screen w-full flex flex-col items-center justify-center bg-[#020202] text-white">
+        <div className="w-12 h-12 border-2 border-white/10 border-t-white rounded-full animate-spin mb-4" />
+        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-gray-500">Checking Authorization</p>
+      </div>
+    );
+  }
+
+  if (!session) {
+    return <Auth />;
+  }
+
   return (
     <div className="flex h-screen w-full bg-[#020202] text-gray-200 overflow-hidden font-sans p-2 gap-2">
 
@@ -297,6 +325,14 @@ const App: React.FC = () => {
             >
               <Settings className="w-6 h-6 shrink-0" />
               <span className="hidden lg:block">Settings</span>
+            </button>
+
+            <button
+              onClick={() => supabase.auth.signOut()}
+              className="flex items-center gap-3 px-4 py-4 rounded-2xl transition-all font-bold text-[11px] uppercase tracking-tight group hover:bg-red-500/10 text-gray-400 hover:text-red-400 mt-2"
+            >
+              <LogOut className="w-6 h-6 shrink-0" />
+              <span className="hidden lg:block">Sign Out</span>
             </button>
           </div>
         </div>
