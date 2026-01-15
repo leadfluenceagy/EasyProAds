@@ -68,8 +68,10 @@ export const Feedback: React.FC = () => {
 
             console.log('Insert response:', { insertData, error });
             if (error) throw error;
+
             if (!insertData || insertData.length === 0) {
-                console.warn('Insert succeeded but no data returned. This usually means an RLS policy blocked the write.');
+                console.warn('Insert completed but NO data returned. RLS is likely BLOCKING the write.');
+                throw new Error('Permisos insuficientes: Supabase bloqueó el envío. ¿Ejecutaste el SQL de permisos?');
             }
 
             setTitle('');
@@ -97,6 +99,8 @@ export const Feedback: React.FC = () => {
                     <div className="space-y-2">
                         <label className="text-[10px] font-bold uppercase tracking-widest text-gray-500 pl-2">Subject</label>
                         <input
+                            id="feedback-title"
+                            name="title"
                             type="text"
                             value={title}
                             onChange={(e) => setTitle(e.target.value)}
@@ -108,6 +112,8 @@ export const Feedback: React.FC = () => {
                     <div className="space-y-2">
                         <label className="text-[10px] font-bold uppercase tracking-widest text-gray-500 pl-2">Description</label>
                         <textarea
+                            id="feedback-description"
+                            name="description"
                             value={description}
                             onChange={(e) => setDescription(e.target.value)}
                             placeholder="Details about your suggestion..."
