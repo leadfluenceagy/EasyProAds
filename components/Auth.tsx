@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { supabase } from '../services/supabase';
-import { Mail, Lock, Loader2, ArrowRight } from 'lucide-react';
+import { Mail, Lock, Loader2, ArrowRight, User } from 'lucide-react';
 
 export const Auth: React.FC = () => {
     const [loading, setLoading] = useState(false);
-    const [email, setEmail] = useState('');
+    const [identifier, setIdentifier] = useState(''); // Email or Username
+    const [email, setEmail] = useState(''); // Real email for verification
+    const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
     const [otpToken, setOtpToken] = useState('');
     const [view, setView] = useState<'sign_in' | 'sign_up' | 'verify'>('sign_in');
@@ -19,16 +21,38 @@ export const Auth: React.FC = () => {
 
         try {
             if (view === 'sign_up') {
+                if (!username.trim()) throw new Error('Username is required');
                 const { error: signUpError } = await supabase.auth.signUp({
                     email,
                     password,
+                    options: {
+                        data: {
+                            username: username.trim()
+                        }
+                    }
                 });
                 if (signUpError) throw signUpError;
                 setMessage('Successfully signed up! Enter the 6-digit code sent to your email.');
                 setView('verify');
             } else if (view === 'sign_in') {
+                let targetEmail = identifier.trim();
+
+                // Check if the identifier is a username (no @)
+                if (!targetEmail.includes('@')) {
+                    const { data, error: profileError } = await supabase
+                        .from('profiles')
+                        .select('email')
+                        .eq('username', targetEmail)
+                        .single();
+
+                    if (profileError || !data) {
+                        throw new Error('Username not found');
+                    }
+                    targetEmail = data.email;
+                }
+
                 const { error: signInError } = await supabase.auth.signInWithPassword({
-                    email,
+                    email: targetEmail,
                     password,
                 });
                 if (signInError) throw signInError;
@@ -74,26 +98,68 @@ export const Auth: React.FC = () => {
 
                         {view !== 'verify' ? (
                             <>
-                                {/* EMAIL INPUT */}
-                                <div className="space-y-2">
-                                    <label className="text-[10px] font-bold uppercase tracking-widest text-gray-500 pl-2">Email</label>
-                                    <div className="relative group">
-                                        <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-gray-500 group-focus-within:text-white transition-colors">
-                                            <Mail className="w-4 h-4" />
+                                {view === 'sign_in' ? (
+                                    /* LOGIN IDENTIFIER (Email or Username) */
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-bold uppercase tracking-widest text-gray-500 pl-2">Email or Username</label>
+                                        <div className="relative group">
+                                            <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-gray-500 group-focus-within:text-white transition-colors">
+                                                <User className="w-4 h-4" />
+                                            </div>
+                                            <input
+                                                id="identifier"
+                                                name="identifier"
+                                                type="text"
+                                                value={identifier}
+                                                onChange={(e) => setIdentifier(e.target.value)}
+                                                required
+                                                placeholder="email or username"
+                                                className="w-full bg-white/5 border border-white/10 rounded-xl py-4 pl-11 pr-4 text-sm font-medium focus:outline-none focus:ring-1 focus:ring-white/20 focus:border-white/30 transition-all placeholder:text-gray-700 hover:bg-white/10"
+                                            />
                                         </div>
-                                        <input
-                                            id="email"
-                                            name="email"
-                                            type="email"
-                                            autoComplete="email"
-                                            value={email}
-                                            onChange={(e) => setEmail(e.target.value)}
-                                            required
-                                            placeholder="name@example.com"
-                                            className="w-full bg-white/5 border border-white/10 rounded-xl py-4 pl-11 pr-4 text-sm font-medium focus:outline-none focus:ring-1 focus:ring-white/20 focus:border-white/30 transition-all placeholder:text-gray-700 hover:bg-white/10"
-                                        />
                                     </div>
-                                </div>
+                                ) : (
+                                    /* SIGN UP FIELDS */
+                                    <>
+                                        <div className="space-y-2">
+                                            <label className="text-[10px] font-bold uppercase tracking-widest text-gray-500 pl-2">Username</label>
+                                            <div className="relative group">
+                                                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-gray-500 group-focus-within:text-white transition-colors">
+                                                    <User className="w-4 h-4" />
+                                                </div>
+                                                <input
+                                                    id="username"
+                                                    name="username"
+                                                    type="text"
+                                                    value={username}
+                                                    onChange={(e) => setUsername(e.target.value)}
+                                                    required
+                                                    placeholder="cooluser123"
+                                                    className="w-full bg-white/5 border border-white/10 rounded-xl py-4 pl-11 pr-4 text-sm font-medium focus:outline-none focus:ring-1 focus:ring-white/20 focus:border-white/30 transition-all placeholder:text-gray-700 hover:bg-white/10"
+                                                />
+                                            </div>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <label className="text-[10px] font-bold uppercase tracking-widest text-gray-500 pl-2">Email</label>
+                                            <div className="relative group">
+                                                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-gray-500 group-focus-within:text-white transition-colors">
+                                                    <Mail className="w-4 h-4" />
+                                                </div>
+                                                <input
+                                                    id="email"
+                                                    name="email"
+                                                    type="email"
+                                                    autoComplete="email"
+                                                    value={email}
+                                                    onChange={(e) => setEmail(e.target.value)}
+                                                    required
+                                                    placeholder="name@example.com"
+                                                    className="w-full bg-white/5 border border-white/10 rounded-xl py-4 pl-11 pr-4 text-sm font-medium focus:outline-none focus:ring-1 focus:ring-white/20 focus:border-white/30 transition-all placeholder:text-gray-700 hover:bg-white/10"
+                                                />
+                                            </div>
+                                        </div>
+                                    </>
+                                )}
 
                                 {/* PASSWORD INPUT */}
                                 <div className="space-y-2">
