@@ -32,10 +32,12 @@ export const Feedback: React.FC = () => {
 
             if (error) throw error;
             // Handle the type cast for the joined profile data
+            console.log('Fetched feedbacks data raw:', data);
             const formattedData = (data || []).map((item: any) => ({
                 ...item,
                 username: item.profiles?.username || 'Anonymous'
             }));
+            console.log('Formatted feedbacks:', formattedData);
             setFeedbacks(formattedData);
         } catch (err) {
             console.error('Error fetching feedbacks:', err);
@@ -57,13 +59,18 @@ export const Feedback: React.FC = () => {
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) throw new Error('Not authenticated');
 
-            const { error } = await supabase
+            const { data: insertData, error } = await supabase
                 .from('feedbacks')
                 .insert([
                     { title, description, user_id: user.id }
-                ]);
+                ])
+                .select();
 
+            console.log('Insert response:', { insertData, error });
             if (error) throw error;
+            if (!insertData || insertData.length === 0) {
+                console.warn('Insert succeeded but no data returned. This usually means an RLS policy blocked the write.');
+            }
 
             setTitle('');
             setDescription('');
