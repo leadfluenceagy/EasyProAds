@@ -32,12 +32,15 @@ export const Feedback: React.FC = () => {
 
             if (error) throw error;
             // Handle the type cast for the joined profile data
-            console.log('Fetched feedbacks data raw:', data);
+            console.log('--- FETCH FEEDBACKS DEBUG ---');
+            console.log('Raw data from DB:', data);
+
             const formattedData = (data || []).map((item: any) => ({
                 ...item,
                 username: item.profiles?.username || 'Anonymous'
             }));
-            console.log('Formatted feedbacks:', formattedData);
+
+            console.log('Formatted list for UI:', formattedData);
             setFeedbacks(formattedData);
         } catch (err) {
             console.error('Error fetching feedbacks:', err);
@@ -97,7 +100,7 @@ export const Feedback: React.FC = () => {
             <div className="glass-panel border border-white/5 bg-white/5 p-6 rounded-[2rem] shadow-xl">
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div className="space-y-2">
-                        <label className="text-[10px] font-bold uppercase tracking-widest text-gray-500 pl-2">Subject</label>
+                        <label htmlFor="feedback-title" className="text-[10px] font-bold uppercase tracking-widest text-gray-500 pl-2">Subject</label>
                         <input
                             id="feedback-title"
                             name="title"
@@ -110,7 +113,7 @@ export const Feedback: React.FC = () => {
                         />
                     </div>
                     <div className="space-y-2">
-                        <label className="text-[10px] font-bold uppercase tracking-widest text-gray-500 pl-2">Description</label>
+                        <label htmlFor="feedback-description" className="text-[10px] font-bold uppercase tracking-widest text-gray-500 pl-2">Description</label>
                         <textarea
                             id="feedback-description"
                             name="description"
