@@ -27,21 +27,35 @@ CRITICAL CONSTRAINTS:
 7. NEGATIVE: Different face, altered features, CGI look, deepfake artifacts, extra fingers, blurry, oversaturated.
 `;
 
-// Fix: Follow GoogleGenAI initialization guidelines and ensure correct model usage
 export const professionalizePrompt = async (input: string, mode: ChatMode, imagesBase64: string[] = []): Promise<string> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_API_KEY });
 
   let systemInstruction = GENERATOR_PROMPT;
   if (mode === 'iteration') systemInstruction = ITERATION_PROMPT;
   if (mode === 'fashion') systemInstruction = FASHION_PROMPT;
 
+  // Enhanced instruction when images are present
+  const hasImages = imagesBase64.length > 0;
+  const imageAnalysisInstruction = hasImages
+    ? `\n\nCRITICAL IMAGE ANALYSIS REQUIRED:
+You are analyzing ${imagesBase64.length} reference image(s). You MUST:
+1. Describe EVERY visible object, product, person, or subject in extreme detail
+2. Note exact colors (hex codes if possible), materials, textures, shapes, sizes
+3. Describe lighting, shadows, perspective, and composition
+4. List all visible text, logos, or branding (to be removed if needed)
+5. Identify the environment, setting, and background elements
+6. Your output prompt MUST be so detailed that an image generator can recreate these objects/subjects without seeing the original images
+
+Output Format: A single, comprehensive prompt for Imagen that includes all visual details from the reference images combined with the user's request.`
+    : '';
+
   const parts: Part[] = [
     {
-      text: mode === 'fashion'
+      text: (mode === 'fashion'
         ? `Fashion Iteration Request: "${input}". Focus on identity preservation and high-end editorial quality.`
         : mode === 'iteration'
           ? `Ad Re-composition Request: "${input}". Match reference style perfectly.`
-          : `Environment Synthesis Request: "${input}"`
+          : `Environment Synthesis Request: "${input}"`) + imageAnalysisInstruction
     }
   ];
 
@@ -55,24 +69,31 @@ export const professionalizePrompt = async (input: string, mode: ChatMode, image
     });
   });
 
-  const response = await ai.models.generateContent({
-    model: 'gemini-3-pro-preview',
-    contents: { parts },
-    config: {
-      systemInstruction,
-      temperature: 0.5,
-    },
-  });
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash-lite-preview-09-2025',
+      contents: [{ role: 'user', parts: parts }],
+      config: {
+        systemInstruction,
+        temperature: 0.7, // Increased for more creative descriptions
+      },
+    });
 
-  return response.text?.trim() || input;
+    const txt = response.text;
+    console.log('🎨 OPTIMIZED PROMPT:', txt);
+    return txt?.trim() || input;
+  } catch (err) {
+    console.error("Prompt optimization failed:", err);
+    return input;
+  }
 };
 
-// Fix: Ensure proper image generation model usage and output extraction
 export const generateImage = async (prompt: string, aspectRatio: AspectRatio, referenceImages: string[] = []): Promise<string> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_API_KEY });
 
   const parts: Part[] = [{ text: prompt }];
 
+  // Add reference images as inline data parts (this is how it worked before!)
   referenceImages.forEach((img) => {
     const mimeType = img.match(/^data:(image\/[a-zA-Z+]+);base64,/)?.[1] || 'image/png';
     parts.unshift({
@@ -85,6 +106,8 @@ export const generateImage = async (prompt: string, aspectRatio: AspectRatio, re
 
   parts.push({ text: "FINAL VERIFICATION: Absolute facial identity preservation. Photographic realism. 8K Resolution. No text. No artifacts." });
 
+  console.log(`Generating image with ${referenceImages.length} reference images using gemini-3-pro-image-preview`);
+
   const response = await ai.models.generateContent({
     model: 'gemini-3-pro-image-preview',
     contents: { parts },
@@ -96,6 +119,7 @@ export const generateImage = async (prompt: string, aspectRatio: AspectRatio, re
     },
   });
 
+  // Extract the generated image from response parts
   let imageUrl = '';
   if (response.candidates?.[0]?.content) {
     for (const part of response.candidates[0].content.parts) {
@@ -106,6 +130,6 @@ export const generateImage = async (prompt: string, aspectRatio: AspectRatio, re
     }
   }
 
-  if (!imageUrl) throw new Error('Generation failed.');
+  if (!imageUrl) throw new Error('Generation failed. No image in response.');
   return imageUrl;
 };

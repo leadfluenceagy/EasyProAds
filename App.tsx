@@ -4,7 +4,6 @@ import { professionalizePrompt, generateImage } from './services/geminiService';
 import { supabase } from './services/supabase';
 import { Auth } from './components/Auth';
 import { Feedback } from './components/Feedback';
-import { Settings } from './components/Settings';
 import { Session } from '@supabase/supabase-js';
 import {
   Send,
@@ -22,11 +21,10 @@ import {
   LayoutGrid,
   Repeat,
   Layers,
-  Settings as SettingsIcon,
+  Settings,
   LogOut,
   MessageSquare,
-  User,
-  ChevronDown
+  User
 } from 'lucide-react';
 
 // Fix: Use explicit global declaration for aistudio to avoid type conflicts and resolve Blob error
@@ -45,11 +43,21 @@ type View = 'workspace' | 'gallery' | 'settings' | 'feedback';
 const App: React.FC = () => {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
-  const [userMenuOpen, setUserMenuOpen] = useState(false);
 
   useEffect(() => {
     // Escuchar cambios de autenticación
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      console.log('Auth change event:', _event, session?.user?.email);
+
+      // Si hay un error de token, limpiar la sesión
+      if (_event === 'TOKEN_REFRESHED' && !session) {
+        console.warn('Token refresh failed, signing out...');
+        await supabase.auth.signOut();
+        setSession(null);
+        setLoading(false);
+        return;
+      }
+
       setSession(session);
       setLoading(false);
     });
@@ -58,30 +66,21 @@ const App: React.FC = () => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setLoading(false);
-    }).catch(err => {
+    }).catch(async (err) => {
       console.error('Session check error:', err);
+
+      // Si el error es de refresh token, limpiar todo y forzar re-login
+      if (err?.message?.includes('refresh') || err?.message?.includes('token')) {
+        console.warn('Invalid refresh token detected, clearing session...');
+        await supabase.auth.signOut();
+        setSession(null);
+      }
+
       setLoading(false);
     });
 
     return () => subscription.unsubscribe();
   }, []);
-
-  // Handle click outside to close user menu
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      const target = event.target as HTMLElement;
-      if (userMenuOpen && !target.closest('.user-menu-container')) {
-        setUserMenuOpen(false);
-      }
-    };
-
-    if (userMenuOpen) {
-      window.addEventListener('mousedown', handleClickOutside);
-    }
-    return () => {
-      window.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [userMenuOpen]);
 
   // Navigation State
   const [currentView, setCurrentView] = useState<View>('workspace');
@@ -107,6 +106,7 @@ const App: React.FC = () => {
 
   const [hasKey, setHasKey] = useState<boolean | null>(null);
   const [selectedImages, setSelectedImages] = useState<string[]>([]);
+  const [lastPrompt, setLastPrompt] = useState<string>('');
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -211,7 +211,12 @@ const App: React.FC = () => {
     setIsProcessing(true);
 
     try {
+      console.log('Starting prompt optimization...', { query, mode: currentMode, imageCount: currentImgs.length });
       const optimizedPrompt = await professionalizePrompt(query, currentMode, currentImgs);
+      console.log('Prompt optimized:', optimizedPrompt.substring(0, 100) + '...');
+
+      // Save the last prompt for 1:1 generation
+      setLastPrompt(optimizedPrompt);
 
       setPromptMapByMode(prev => ({
         ...prev,
@@ -227,7 +232,9 @@ const App: React.FC = () => {
         )
       }));
 
+      console.log('Starting image generation...');
       const finalImageUrl = await generateImage(optimizedPrompt, '9:16', currentImgs);
+      console.log('Image generated successfully');
 
       setHistory(prev => [...prev, {
         id: Date.now().toString(),
@@ -247,12 +254,13 @@ const App: React.FC = () => {
       }));
 
     } catch (error: any) {
+      console.error('Error in handleSend:', error);
       if (error?.message?.includes("Requested entity was not found")) setHasKey(false);
       setMessagesByMode(prev => ({
         ...prev,
         [currentMode]: prev[currentMode].map(m =>
           m.id === assistantMsgId
-            ? { ...m, content: 'Synthesis failed. Please ensure the references are photographic.', status: 'error' }
+            ? { ...m, content: `Synthesis failed: ${error?.message || 'Unknown error'}`, status: 'error' }
             : m
         )
       }));
@@ -261,18 +269,21 @@ const App: React.FC = () => {
     }
   };
 
-  const handleGenerate1to1 = async (msgId: string) => {
+  const handleGenerate1to1 = async (msgId?: string) => {
     const currentMode = activeMode;
-    const prompt = promptMapByMode[currentMode][msgId];
+    // Use lastPrompt if no msgId provided (new design)
+    const prompt = msgId ? promptMapByMode[currentMode][msgId] : lastPrompt;
     if (!prompt || isProcessing) return;
 
-    const original916 = history.find(h => h.prompt === prompt && h.aspectRatio === '9:16');
+    const original916 = history.find(h => h.aspectRatio === '9:16');
 
     setIsProcessing(true);
-    setMessagesByMode(prev => ({
-      ...prev,
-      [currentMode]: prev[currentMode].map(m => m.id === msgId ? { ...m, status: 'generating' } : m)
-    }));
+    if (msgId) {
+      setMessagesByMode(prev => ({
+        ...prev,
+        [currentMode]: prev[currentMode].map(m => m.id === msgId ? { ...m, status: 'generating' } : m)
+      }));
+    }
 
     try {
       const imageUrl11 = await generateImage(prompt, '1:1', original916 ? [original916.url] : []);
@@ -285,10 +296,12 @@ const App: React.FC = () => {
         timestamp: Date.now(),
       }, ...prev]);
 
-      setMessagesByMode(prev => ({
-        ...prev,
-        [currentMode]: prev[currentMode].map(m => m.id === msgId ? { ...m, status: 'done' } : m)
-      }));
+      if (msgId) {
+        setMessagesByMode(prev => ({
+          ...prev,
+          [currentMode]: prev[currentMode].map(m => m.id === msgId ? { ...m, status: 'done' } : m)
+        }));
+      }
     } catch (error: any) {
       if (error?.message?.includes("Requested entity was not found")) setHasKey(false);
     } finally {
@@ -354,47 +367,17 @@ const App: React.FC = () => {
               className={`flex items-center gap-3 px-4 py-4 rounded-2xl transition-all font-bold text-[11px] uppercase tracking-tight group ${currentView === 'settings' ? 'bg-white text-black shadow-lg' : 'hover:bg-white/5 text-gray-400'
                 }`}
             >
-              <SettingsIcon className="w-6 h-6 shrink-0" />
+              <Settings className="w-6 h-6 shrink-0" />
               <span className="hidden lg:block">Settings</span>
             </button>
 
-
-            {/* USER MENU DROPDOWN */}
-            <div className="p-4 border-t border-white/5 relative user-menu-container">
-              {userMenuOpen && (
-                <div className="absolute bottom-full left-4 right-4 mb-2 glass-panel bg-[#121212] border border-white/10 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-200 z-50">
-                  <button
-                    onClick={async () => {
-                      await supabase.auth.signOut();
-                      setUserMenuOpen(false);
-                    }}
-                    className="w-full flex items-center gap-3 px-4 py-4 text-red-400 hover:bg-white/5 transition-colors font-bold text-[11px] uppercase tracking-tight"
-                  >
-                    <LogOut className="w-4 h-4" />
-                    Sign Out
-                  </button>
-                </div>
-              )}
-
-              <button
-                onClick={() => setUserMenuOpen(!userMenuOpen)}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl transition-all group border border-transparent ${userMenuOpen ? 'bg-white/10 border-white/10' : 'hover:bg-white/5'
-                  }`}
-              >
-                <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-purple-500/20 to-blue-500/20 flex items-center justify-center border border-white/10 shrink-0">
-                  <User className="w-4 h-4 text-purple-400" />
-                </div>
-                <div className="flex-1 text-left hidden lg:block overflow-hidden leading-tight">
-                  <p className="text-[11px] font-black uppercase tracking-tight truncate text-white">
-                    {session?.user?.user_metadata?.username || 'User Profile'}
-                  </p>
-                  <p className="text-[9px] font-bold text-gray-500 truncate lowercase">
-                    {session?.user?.email}
-                  </p>
-                </div>
-                <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform hidden lg:block ${userMenuOpen ? 'rotate-180' : ''}`} />
-              </button>
-            </div>
+            <button
+              onClick={() => supabase.auth.signOut()}
+              className="flex items-center gap-3 px-4 py-4 rounded-2xl transition-all font-bold text-[11px] uppercase tracking-tight group hover:bg-red-500/10 text-gray-400 hover:text-red-400 mt-2"
+            >
+              <LogOut className="w-6 h-6 shrink-0" />
+              <span className="hidden lg:block">Sign Out</span>
+            </button>
           </div>
         </div>
       </aside>
@@ -435,157 +418,175 @@ const App: React.FC = () => {
           onDrop={handleDrop}
         >
 
-          {/* VIEW: WORKSPACE */}
+          {/* VIEW: WORKSPACE - New Figma Design */}
           {currentView === 'workspace' && (
-            <>
-              <div
-                className="absolute inset-0 overflow-y-auto p-4 md:p-8 pt-6 chat-container pb-32"
-              >
-                <div className="max-w-4xl mx-auto space-y-12">
-                  {activeMessages.length === 0 && (
-                    <div className="h-full flex flex-col items-center justify-center py-20 text-center space-y-8 opacity-50">
-                      <div className="w-20 h-20 bg-white/5 rounded-3xl flex items-center justify-center border border-white/10 shadow-2xl backdrop-blur-3xl">
-                        {activeMode === 'fashion' ? <Layers className="w-8 h-8 text-white/40" /> : activeMode === 'iteration' ? <Repeat className="w-8 h-8 text-white/40" /> : <LayoutGrid className="w-8 h-8 text-white/40" />}
-                      </div>
-                      <h2 className="text-3xl font-black text-white tracking-tighter uppercase">
-                        {activeMode === 'generator' ? 'Product Scene' : activeMode === 'iteration' ? 'Reference Copy' : 'Fashion Edit'}
-                      </h2>
-                      <p className="text-gray-500 max-w-lg mx-auto text-sm font-medium tracking-tight leading-relaxed">
-                        {activeMode === 'generator' ? 'Añade un producto preferiblemente en png y dale una breve descripción de cómo quieres adaptarlo a qué fondo.' :
-                          activeMode === 'iteration' ? 'Añade un anuncio de referencia y añade el producto que quieras meter en ese anuncio. De esta forma tendrás el mismo anuncio pero con tu producto deseado. IMPORTANTE: Todo el texto se elimina.' :
-                            'Primero pasa una foto de la cara de la modelo, luego pasa la foto de moda que quieras iterar.\nEJ: Meto la cara de la de Milan y meto una foto de ella llevando el vestido, le digo que cambie la pose y que el fondo sea en una casa con una piscina infinita.'}
-                      </p>
-                    </div>
-                  )}
+            <div className="h-full overflow-y-auto p-8">
+              <div className="max-w-7xl mx-auto space-y-8">
 
-                  {activeMessages.map((msg) => (
-                    <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'} gap-2`}>
+                {/* TOP SECTION: Images + Prompt Input */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
-                      {/* USER SENT IMAGES (Outside Bubble) */}
-                      {msg.role === 'user' && msg.images && msg.images.length > 0 && (
-                        <div className="flex flex-wrap gap-2 justify-end max-w-[80%] mb-1">
-                          {msg.images.map((img, idx) => (
-                            <div key={idx} className="relative w-24 h-24 shrink-0 overflow-hidden rounded-xl border-2 border-white/10 shadow-lg">
-                              <img src={img} className="w-full h-full object-cover" />
-                            </div>
-                          ))}
+                  {/* LEFT: Add Images Section */}
+                  <div className="space-y-4">
+                    <h3 className="text-xs font-bold uppercase tracking-widest text-gray-400">Añade las imágenes</h3>
+                    <div
+                      className="relative border-2 border-dashed border-white/10 rounded-2xl bg-white/5 hover:bg-white/10 transition-colors min-h-[300px] flex flex-col items-center justify-center cursor-pointer group"
+                      onDragOver={handleDragOver}
+                      onDragEnter={handleDragOver}
+                      onDrop={handleDrop}
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept="image/*" multiple />
+
+                      {selectedImages.length === 0 ? (
+                        <div className="flex flex-col items-center gap-4 text-gray-500">
+                          <Paperclip className="w-12 h-12" />
+                          <p className="text-sm font-bold uppercase tracking-widest">Click o arrastra imágenes aquí</p>
+                        </div>
+                      ) : (
+                        <div className="absolute inset-0 p-4">
+                          <div className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-3">Aquí se deberían de ver las subidas</div>
+                          <div className="grid grid-cols-2 gap-3">
+                            {selectedImages.map((img, idx) => (
+                              <div key={idx} className="relative aspect-square rounded-xl overflow-hidden border border-white/20 bg-black/20 group/img p-2">
+                                <img src={img} className="w-full h-full object-contain" />
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    removeSelectedImage(idx);
+                                  }}
+                                  className="absolute top-2 right-2 bg-red-500 p-1.5 rounded-full text-white opacity-0 group-hover/img:opacity-100 transition-opacity"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
                         </div>
                       )}
-
-                      <div className={`group relative max-w-[90%] md:max-w-[80%] p-5 rounded-2xl shadow-xl ${msg.role === 'user'
-                        ? 'bg-white text-black font-medium'
-                        : 'glass-panel text-gray-100 border border-white/5 backdrop-blur-3xl'
-                        }`}>
-
-                        {msg.role === 'assistant' && (
-                          <div className="flex items-center gap-2 mb-4 opacity-50">
-                            <ShieldCheck className="w-3 h-3" />
-                            <span className="text-[9px] font-black uppercase tracking-[0.2em]">Synthesis</span>
-                          </div>
-                        )}
-
-                        <p className={`whitespace-pre-wrap leading-relaxed ${msg.role === 'user' ? 'text-lg' : 'text-sm font-mono text-gray-300'}`}>
-                          {msg.content}
-                        </p>
-
-                        {msg.status === 'done' && (
-                          <div className="mt-8 pt-8 border-t border-white/5 grid grid-cols-1 md:grid-cols-2 gap-6">
-                            {/* 9:16 Result */}
-                            {(() => {
-                              const currentPromptMap = promptMapByMode[activeMode];
-                              const img916 = history.find(h => h.prompt === currentPromptMap[msg.id] && h.aspectRatio === '9:16');
-                              return img916 && (
-                                <div className="space-y-3">
-                                  <span className="text-[9px] font-black text-purple-400 uppercase tracking-widest">9:16 Format</span>
-                                  <div className="overflow-hidden rounded-xl border border-white/10 relative group-img">
-                                    <img src={img916.url} className="w-full h-auto" />
-                                    <button onClick={() => downloadImage(img916.url, img916.id)} className="absolute top-2 right-2 p-2 bg-black/50 text-white rounded-lg hover:bg-black/70 transition-colors">
-                                      <Download className="w-4 h-4" />
-                                    </button>
-                                  </div>
-                                </div>
-                              );
-                            })()}
-
-                            {/* 1:1 Result */}
-                            <div className="space-y-3">
-                              {(() => {
-                                const currentPromptMap = promptMapByMode[activeMode];
-                                const img11 = history.find(h => h.prompt === currentPromptMap[msg.id] && h.aspectRatio === '1:1');
-                                if (img11) {
-                                  return (
-                                    <>
-                                      <span className="text-[9px] font-black text-purple-400 uppercase tracking-widest">1:1 Format</span>
-                                      <div className="overflow-hidden rounded-xl border border-white/10 relative group-img">
-                                        <img src={img11.url} className="w-full h-auto" />
-                                        <button onClick={() => downloadImage(img11.url, img11.id)} className="absolute top-2 right-2 p-2 bg-black/50 text-white rounded-lg hover:bg-black/70 transition-colors">
-                                          <Download className="w-4 h-4" />
-                                        </button>
-                                      </div>
-                                    </>
-                                  );
-                                } else {
-                                  return (
-                                    <div className="h-full flex items-center justify-center p-6 border border-dashed border-white/10 rounded-xl bg-white/5">
-                                      <button onClick={() => handleGenerate1to1(msg.id)} disabled={isProcessing} className="flex flex-col items-center gap-2 text-gray-500 hover:text-white transition-colors">
-                                        {isProcessing ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Plus className="w-5 h-5" />}
-                                        <span className="text-[10px] font-bold uppercase tracking-widest">Create Square</span>
-                                      </button>
-                                    </div>
-                                  );
-                                }
-                              })()}
-                            </div>
-                          </div>
-                        )}
-                      </div>
                     </div>
-                  ))}
-                  <div ref={chatEndRef} />
-                </div>
-              </div>
+                  </div>
 
-              {/* INPUT DOCK */}
-              <div className="absolute bottom-6 inset-x-0 flex flex-col items-center gap-4 px-6 z-30 pointer-events-none">
-                {selectedImages.length > 0 && (
-                  <div className="flex gap-3 pointer-events-auto bg-black/80 p-2 rounded-2xl border border-white/10 backdrop-blur-xl animate-in slide-in-from-bottom-2">
-                    {selectedImages.map((img, idx) => (
-                      <div key={idx} className="relative w-16 h-16 shrink-0">
-                        <img src={img} className="w-full h-full object-cover rounded-lg border border-white/20" />
-                        <button onClick={() => removeSelectedImage(idx)} className="absolute -top-2 -right-2 bg-red-500 p-1 rounded-full text-white">
-                          <X className="w-3 h-3" />
+                  {/* RIGHT: Prompt Input Section */}
+                  <div className="space-y-4">
+                    <h3 className="text-xs font-bold uppercase tracking-widest text-gray-400">Introduce el Prompt</h3>
+                    <div className="relative border border-white/10 rounded-2xl bg-[#1a1a1a] min-h-[300px] flex flex-col">
+                      <textarea
+                        value={inputText}
+                        onChange={(e) => setInputText(e.target.value)}
+                        placeholder="Aquí el usuario mete su prompt..."
+                        className="flex-1 bg-transparent p-6 focus:outline-none text-base font-medium placeholder:text-gray-700 resize-none"
+                      />
+                      <div className="p-4 border-t border-white/5 flex justify-end">
+                        <button
+                          onClick={() => handleSend()}
+                          disabled={isProcessing || (!inputText.trim() && selectedImages.length === 0)}
+                          className={`px-8 py-3 rounded-full font-bold text-sm uppercase tracking-wider transition-all ${isProcessing ? 'bg-gray-800 text-gray-600' : 'bg-white text-black hover:scale-105'
+                            }`}
+                        >
+                          {isProcessing ? (
+                            <div className="flex items-center gap-2">
+                              <RefreshCw className="w-4 h-4 animate-spin" />
+                              <span>Generando...</span>
+                            </div>
+                          ) : (
+                            'Generar'
+                          )}
                         </button>
                       </div>
-                    ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* RESULTS SECTION */}
+                {(history.length > 0 || isProcessing) && (
+                  <div className="space-y-6 pt-8 border-t border-white/10">
+                    <h3 className="text-2xl font-black uppercase tracking-tighter">Resultados</h3>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {/* 9:16 Result */}
+                      <div className="space-y-3">
+                        <div className="text-xs font-bold uppercase tracking-widest text-gray-400">9:16</div>
+                        {(() => {
+                          const img916 = history.find(h => h.aspectRatio === '9:16');
+                          if (img916) {
+                            return (
+                              <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/5 group">
+                                <img src={img916.url} className="w-full h-auto" />
+                                <button
+                                  onClick={() => downloadImage(img916.url, img916.id)}
+                                  className="absolute top-4 right-4 p-3 bg-black/70 text-white rounded-xl hover:bg-black transition-all opacity-0 group-hover:opacity-100"
+                                >
+                                  <Download className="w-5 h-5" />
+                                </button>
+                              </div>
+                            );
+                          } else if (isProcessing) {
+                            return (
+                              <div className="aspect-[9/16] rounded-2xl border border-white/10 bg-white/5 flex items-center justify-center">
+                                <RefreshCw className="w-8 h-8 animate-spin text-gray-500" />
+                              </div>
+                            );
+                          }
+                          return null;
+                        })()}
+                      </div>
+
+                      {/* 1:1 Result */}
+                      <div className="space-y-3">
+                        <div className="text-xs font-bold uppercase tracking-widest text-gray-400">1:1</div>
+                        {(() => {
+                          const img11 = history.find(h => h.aspectRatio === '1:1');
+                          const img916 = history.find(h => h.aspectRatio === '9:16');
+
+                          if (img11) {
+                            return (
+                              <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/5 group">
+                                <img src={img11.url} className="w-full h-auto" />
+                                <button
+                                  onClick={() => downloadImage(img11.url, img11.id)}
+                                  className="absolute top-4 right-4 p-3 bg-black/70 text-white rounded-xl hover:bg-black transition-all opacity-0 group-hover:opacity-100"
+                                >
+                                  <Download className="w-5 h-5" />
+                                </button>
+                              </div>
+                            );
+                          } else if (img916 && !isProcessing) {
+                            return (
+                              <div className="aspect-square rounded-2xl border border-dashed border-white/10 bg-white/5 flex items-center justify-center">
+                                <button
+                                  onClick={() => handleGenerate1to1()}
+                                  className="flex flex-col items-center gap-3 text-gray-500 hover:text-white transition-colors"
+                                >
+                                  <Plus className="w-8 h-8" />
+                                  <span className="text-xs font-bold uppercase tracking-widest">Generar Cuadrado</span>
+                                </button>
+                              </div>
+                            );
+                          }
+                          return null;
+                        })()}
+                      </div>
+                    </div>
                   </div>
                 )}
 
-                <div className="w-full max-w-3xl pointer-events-auto">
-                  <div className="relative flex items-center bg-[#151515] border border-white/10 rounded-[2rem] p-2 shadow-2xl">
-                    <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept="image/*" multiple />
-                    <button onClick={() => fileInputRef.current?.click()} className="p-4 text-gray-500 hover:text-white transition-colors hover:bg-white/5 rounded-full">
-                      <Paperclip className="w-5 h-5" />
-                    </button>
-                    <input
-                      type="text"
-                      value={inputText}
-                      onChange={(e) => setInputText(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-                      placeholder="Describe your idea..."
-                      className="flex-1 bg-transparent px-4 focus:outline-none text-base font-medium placeholder:text-gray-700 h-full"
-                    />
-                    <button
-                      onClick={() => handleSend()}
-                      disabled={isProcessing || (!inputText.trim() && selectedImages.length === 0)}
-                      className={`p-4 rounded-full transition-all ${isProcessing ? 'text-gray-600' : 'bg-white text-black hover:scale-105'
-                        }`}
-                    >
-                      {isProcessing ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
-                    </button>
+                {/* Empty State */}
+                {history.length === 0 && !isProcessing && (
+                  <div className="py-20 text-center space-y-6 opacity-30">
+                    <div className="w-20 h-20 bg-white/5 rounded-3xl flex items-center justify-center border border-white/10 mx-auto">
+                      {activeMode === 'fashion' ? <Layers className="w-8 h-8 text-white/40" /> : activeMode === 'iteration' ? <Repeat className="w-8 h-8 text-white/40" /> : <LayoutGrid className="w-8 h-8 text-white/40" />}
+                    </div>
+                    <p className="text-gray-600 max-w-lg mx-auto text-sm font-medium">
+                      {activeMode === 'generator' ? 'Añade un producto y describe el fondo deseado.' :
+                        activeMode === 'iteration' ? 'Añade un anuncio de referencia y tu producto.' :
+                          'Sube foto de la modelo y la ropa que quieres editar.'}
+                    </p>
                   </div>
-                </div>
+                )}
+
               </div>
-            </>
+            </div>
           )}
 
           {/* VIEW: GALLERY */}
@@ -619,9 +620,112 @@ const App: React.FC = () => {
           )}
 
           {/* VIEW: SETTINGS */}
-          {currentView === 'settings' && (
-            <Settings session={session} />
-          )}
+          {currentView === 'settings' && (() => {
+            const [newUsername, setNewUsername] = useState(session?.user?.user_metadata?.username || '');
+            const [updateStatus, setUpdateStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+            const [errText, setErrText] = useState('');
+
+            const handleUpdateProfile = async (e: React.FormEvent) => {
+              e.preventDefault();
+              if (!newUsername.trim()) return;
+              setUpdateStatus('loading');
+              setErrText('');
+
+              try {
+                // 1. Update auth metadata
+                const { error: authError } = await supabase.auth.updateUser({
+                  data: { username: newUsername.trim() }
+                });
+                if (authError) throw authError;
+
+                // 2. Upsert into profiles table manually (to handle old accounts)
+                const { error: profileError } = await supabase
+                  .from('profiles')
+                  .upsert({
+                    id: session?.user?.id,
+                    username: newUsername.trim(),
+                    email: session?.user?.email
+                  }, { onConflict: 'id' });
+
+                if (profileError) throw profileError;
+
+                setUpdateStatus('success');
+                setTimeout(() => setUpdateStatus('idle'), 3000);
+              } catch (err: any) {
+                setUpdateStatus('error');
+                setErrText(err.message);
+              }
+            };
+
+            return (
+              <div className="h-full flex flex-col p-6 md:p-10 max-w-2xl mx-auto w-full gap-8 overflow-y-auto">
+                <header className="space-y-2">
+                  <h2 className="text-3xl font-black uppercase tracking-tighter">Settings</h2>
+                  <p className="text-gray-500 text-sm font-medium uppercase tracking-widest">Account & Profile Configuration</p>
+                </header>
+
+                <div className="glass-panel border border-white/5 bg-white/5 p-8 rounded-[2rem] shadow-xl space-y-8">
+                  <section className="space-y-6">
+                    <div className="flex items-center gap-4 text-purple-400">
+                      <Settings className="w-5 h-5" />
+                      <h3 className="text-sm font-black uppercase tracking-widest">Profile Identity</h3>
+                    </div>
+
+                    <form onSubmit={handleUpdateProfile} className="space-y-4">
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-bold uppercase tracking-widest text-gray-500 pl-2">Username</label>
+                        <div className="relative group">
+                          <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-gray-500 group-focus-within:text-white transition-colors">
+                            <User className="w-4 h-4" />
+                          </div>
+                          <input
+                            type="text"
+                            value={newUsername}
+                            onChange={(e) => setNewUsername(e.target.value)}
+                            placeholder="Set your username..."
+                            className="w-full bg-black/40 border border-white/10 rounded-xl py-4 pl-11 pr-4 text-sm font-medium focus:outline-none focus:ring-1 focus:ring-white/20 transition-all"
+                          />
+                        </div>
+                        <p className="text-[9px] text-gray-600 font-medium px-2 italic">
+                          This is how others will see you in the community board.
+                        </p>
+                      </div>
+
+                      {updateStatus === 'success' && (
+                        <div className="p-3 bg-green-500/10 border border-green-500/20 rounded-xl text-green-400 text-xs font-bold text-center">
+                          Profile updated successfully!
+                        </div>
+                      )}
+                      {updateStatus === 'error' && (
+                        <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-xs font-bold text-center">
+                          {errText}
+                        </div>
+                      )}
+
+                      <button
+                        type="submit"
+                        disabled={updateStatus === 'loading'}
+                        className="w-full py-4 bg-white text-black rounded-xl font-bold text-sm uppercase tracking-wider hover:scale-[1.01] transition-all flex items-center justify-center gap-2"
+                      >
+                        {updateStatus === 'loading' ? <RefreshCw className="w-4 h-4 animate-spin" /> : 'Save Changes'}
+                      </button>
+                    </form>
+                  </section>
+
+                  <div className="pt-8 border-t border-white/5">
+                    <div className="flex items-center justify-between text-[10px] text-gray-600 font-bold uppercase tracking-widest px-2">
+                      <span>Email</span>
+                      <span className="text-gray-400">{session?.user?.email}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-auto text-center py-10 opacity-20 group hover:opacity-100 transition-opacity">
+                  <p className="text-[8px] font-black uppercase tracking-[0.5em] text-gray-500">EasyProAds Control v1.0.4</p>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* VIEW: FEEDBACK */}
           {currentView === 'feedback' && (
