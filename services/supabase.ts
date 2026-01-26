@@ -8,4 +8,11 @@ if (!supabaseUrl || !supabaseAnonKey) {
     console.warn('Supabase environment variables are missing. Please check .env.local');
 }
 
-export const supabase = createClient(supabaseUrl || '', supabaseAnonKey || '');
+export const supabase = createClient(supabaseUrl || '', supabaseAnonKey || '', {
+    auth: {
+        // Configuración para manejar mejor los errores de refresh token
+        autoRefreshToken: true,
+        persistSession: true,
+        detectSessionInUrl: true
+    }
+});
