@@ -89,16 +89,23 @@ Output Format: A single, comprehensive prompt for Imagen that includes all visua
 };
 
 export const generateImage = async (prompt: string, aspectRatio: AspectRatio, referenceImages: string[] = []): Promise<string> => {
+  console.log('🚀 [generateImage] Starting image generation...');
+  console.log('📝 [generateImage] Prompt length:', prompt.length);
+  console.log('🖼️  [generateImage] Reference images count:', referenceImages.length);
+  console.log('📐 [generateImage] Aspect ratio:', aspectRatio);
+
   const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_API_KEY });
 
   const parts: Part[] = [{ text: prompt }];
 
   // Add reference images as inline data parts (this is how it worked before!)
-  referenceImages.forEach((img) => {
+  referenceImages.forEach((img, idx) => {
     const mimeType = img.match(/^data:(image\/[a-zA-Z+]+);base64,/)?.[1] || 'image/png';
+    const base64Data = img.split(',')[1] || img;
+    console.log(`🖼️  [generateImage] Adding reference image ${idx + 1}: ${mimeType}, data length: ${base64Data.length}`);
     parts.unshift({
       inlineData: {
-        data: img.split(',')[1] || img,
+        data: base64Data,
         mimeType: mimeType
       }
     });
@@ -106,30 +113,47 @@ export const generateImage = async (prompt: string, aspectRatio: AspectRatio, re
 
   parts.push({ text: "FINAL VERIFICATION: Absolute facial identity preservation. Photographic realism. 8K Resolution. No text. No artifacts." });
 
-  console.log(`Generating image with ${referenceImages.length} reference images using gemini-3-pro-image-preview`);
+  console.log('🎯 [generateImage] Total parts to send:', parts.length);
+  console.log('📡 [generateImage] Calling Gemini API with model: gemini-3-pro-image-preview');
 
-  const response = await ai.models.generateContent({
-    model: 'gemini-3-pro-image-preview',
-    contents: { parts },
-    config: {
-      imageConfig: {
-        aspectRatio: aspectRatio,
-        imageSize: "4K"
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-pro-image-preview',
+      contents: { parts },
+      config: {
+        imageConfig: {
+          aspectRatio: aspectRatio,
+          imageSize: "4K"
+        },
       },
-    },
-  });
+    });
 
-  // Extract the generated image from response parts
-  let imageUrl = '';
-  if (response.candidates?.[0]?.content) {
-    for (const part of response.candidates[0].content.parts) {
-      if (part.inlineData) {
-        imageUrl = `data:image/png;base64,${part.inlineData.data}`;
-        break;
+    console.log('✅ [generateImage] API call successful');
+    console.log('📦 [generateImage] Response candidates:', response.candidates?.length || 0);
+
+    // Extract the generated image from response parts
+    let imageUrl = '';
+    if (response.candidates?.[0]?.content) {
+      console.log('🔍 [generateImage] Searching for image in response parts...');
+      for (const part of response.candidates[0].content.parts) {
+        if (part.inlineData) {
+          imageUrl = `data:image/png;base64,${part.inlineData.data}`;
+          console.log('🎉 [generateImage] Image found! Data length:', part.inlineData.data.length);
+          break;
+        }
       }
     }
-  }
 
-  if (!imageUrl) throw new Error('Generation failed. No image in response.');
-  return imageUrl;
+    if (!imageUrl) {
+      console.error('❌ [generateImage] No image in response');
+      console.error('Response structure:', JSON.stringify(response, null, 2));
+      throw new Error('Generation failed. No image in response.');
+    }
+
+    console.log('✨ [generateImage] Image generation complete!');
+    return imageUrl;
+  } catch (error) {
+    console.error('💥 [generateImage] Error during generation:', error);
+    throw error;
+  }
 };

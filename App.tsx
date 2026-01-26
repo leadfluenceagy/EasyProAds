@@ -107,6 +107,7 @@ const App: React.FC = () => {
   const [hasKey, setHasKey] = useState<boolean | null>(null);
   const [selectedImages, setSelectedImages] = useState<string[]>([]);
   const [lastPrompt, setLastPrompt] = useState<string>('');
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -134,10 +135,14 @@ const App: React.FC = () => {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files) return;
     const files = Array.from(e.target.files) as File[];
+    console.log('📁 [handleFileChange] Files selected:', files.length);
     files.forEach(file => {
+      console.log('📷 [handleFileChange] Processing file:', file.name, file.type, file.size);
       const reader = new FileReader();
       reader.onloadend = () => {
-        setSelectedImages(prev => [...prev, reader.result as string]);
+        const result = reader.result as string;
+        console.log('✅ [handleFileChange] File loaded, size:', result.length);
+        setSelectedImages(prev => [...prev, result]);
       };
       reader.readAsDataURL(file);
     });
@@ -180,7 +185,17 @@ const App: React.FC = () => {
 
   const handleSend = async (text?: string) => {
     const query = text || inputText;
-    if ((!query.trim() && selectedImages.length === 0) || isProcessing) return;
+
+    console.log('🎬 [handleSend] Button clicked!');
+    console.log('📝 [handleSend] Query:', query);
+    console.log('🖼️  [handleSend] Selected images:', selectedImages.length);
+    console.log('🔄 [handleSend] Is processing:', isProcessing);
+    console.log('🎭 [handleSend] Active mode:', activeMode);
+
+    if ((!query.trim() && selectedImages.length === 0) || isProcessing) {
+      console.log('⚠️ [handleSend] Early return - no query/images or already processing');
+      return;
+    }
 
     if (currentView !== 'workspace') setCurrentView('workspace');
 
@@ -325,6 +340,41 @@ const App: React.FC = () => {
   return (
     <div className="flex h-screen w-full bg-[#020202] text-gray-200 overflow-hidden font-sans p-2 gap-2">
 
+      {/* IMAGE PREVIEW LIGHTBOX */}
+      {previewImage && (
+        <div
+          className="fixed inset-0 z-50 bg-black/90 backdrop-blur-sm flex items-center justify-center p-8 cursor-pointer"
+          onClick={() => setPreviewImage(null)}
+        >
+          <div className="relative max-w-[90vw] max-h-[90vh]" onClick={(e) => e.stopPropagation()}>
+            <img
+              src={previewImage}
+              alt="Preview"
+              className="max-w-full max-h-[85vh] object-contain rounded-xl shadow-2xl"
+            />
+            <div className="absolute top-4 right-4 flex gap-2">
+              <button
+                onClick={() => {
+                  const link = document.createElement('a');
+                  link.href = previewImage;
+                  link.download = `easyproadds-${Date.now()}.png`;
+                  link.click();
+                }}
+                className="p-3 bg-white text-black rounded-xl hover:bg-gray-200 transition-all shadow-lg"
+              >
+                <Download className="w-5 h-5" />
+              </button>
+              <button
+                onClick={() => setPreviewImage(null)}
+                className="p-3 bg-white/10 text-white rounded-xl hover:bg-white/20 transition-all"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* LEFT SIDEBAR navigation */}
       <aside className="w-20 lg:w-64 flex flex-col gap-4 h-full shrink-0">
         <div className="glass-panel border border-white/5 bg-[#050505] rounded-[2rem] flex flex-col h-full shadow-xl overflow-hidden">
@@ -418,172 +468,215 @@ const App: React.FC = () => {
           onDrop={handleDrop}
         >
 
-          {/* VIEW: WORKSPACE - New Figma Design */}
+          {/* VIEW: WORKSPACE - Two Column Layout */}
           {currentView === 'workspace' && (
-            <div className="h-full overflow-y-auto p-8">
-              <div className="max-w-7xl mx-auto space-y-8">
+            <div className="h-full flex gap-4 p-4 overflow-hidden">
 
-                {/* TOP SECTION: Images + Prompt Input */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* LEFT COLUMN: Images + Results */}
+              <div className="w-[380px] flex flex-col gap-4 shrink-0 overflow-y-auto">
 
-                  {/* LEFT: Add Images Section */}
-                  <div className="space-y-4">
-                    <h3 className="text-xs font-bold uppercase tracking-widest text-gray-400">Añade las imágenes</h3>
-                    <div
-                      className="relative border-2 border-dashed border-white/10 rounded-2xl bg-white/5 hover:bg-white/10 transition-colors min-h-[300px] flex flex-col items-center justify-center cursor-pointer group"
-                      onDragOver={handleDragOver}
-                      onDragEnter={handleDragOver}
-                      onDrop={handleDrop}
-                      onClick={() => fileInputRef.current?.click()}
-                    >
-                      <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept="image/*" multiple />
+                {/* Add Images Section */}
+                <div className="space-y-3">
+                  <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500">Añade las imágenes</h3>
+                  <div
+                    className="relative border-2 border-dashed border-white/10 rounded-xl bg-white/5 hover:bg-white/10 transition-colors h-[200px] flex flex-col items-center justify-center cursor-pointer group"
+                    onDragOver={handleDragOver}
+                    onDragEnter={handleDragOver}
+                    onDrop={handleDrop}
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept="image/*" multiple />
 
-                      {selectedImages.length === 0 ? (
-                        <div className="flex flex-col items-center gap-4 text-gray-500">
-                          <Paperclip className="w-12 h-12" />
-                          <p className="text-sm font-bold uppercase tracking-widest">Click o arrastra imágenes aquí</p>
-                        </div>
-                      ) : (
-                        <div className="absolute inset-0 p-4">
-                          <div className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-3">Aquí se deberían de ver las subidas</div>
-                          <div className="grid grid-cols-2 gap-3">
-                            {selectedImages.map((img, idx) => (
-                              <div key={idx} className="relative aspect-square rounded-xl overflow-hidden border border-white/20 bg-black/20 group/img p-2">
-                                <img src={img} className="w-full h-full object-contain" />
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    removeSelectedImage(idx);
-                                  }}
-                                  className="absolute top-2 right-2 bg-red-500 p-1.5 rounded-full text-white opacity-0 group-hover/img:opacity-100 transition-opacity"
-                                >
-                                  <X className="w-3 h-3" />
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* RIGHT: Prompt Input Section */}
-                  <div className="space-y-4">
-                    <h3 className="text-xs font-bold uppercase tracking-widest text-gray-400">Introduce el Prompt</h3>
-                    <div className="relative border border-white/10 rounded-2xl bg-[#1a1a1a] min-h-[300px] flex flex-col">
-                      <textarea
-                        value={inputText}
-                        onChange={(e) => setInputText(e.target.value)}
-                        placeholder="Aquí el usuario mete su prompt..."
-                        className="flex-1 bg-transparent p-6 focus:outline-none text-base font-medium placeholder:text-gray-700 resize-none"
-                      />
-                      <div className="p-4 border-t border-white/5 flex justify-end">
-                        <button
-                          onClick={() => handleSend()}
-                          disabled={isProcessing || (!inputText.trim() && selectedImages.length === 0)}
-                          className={`px-8 py-3 rounded-full font-bold text-sm uppercase tracking-wider transition-all ${isProcessing ? 'bg-gray-800 text-gray-600' : 'bg-white text-black hover:scale-105'
-                            }`}
-                        >
-                          {isProcessing ? (
-                            <div className="flex items-center gap-2">
-                              <RefreshCw className="w-4 h-4 animate-spin" />
-                              <span>Generando...</span>
-                            </div>
-                          ) : (
-                            'Generar'
-                          )}
-                        </button>
+                    {selectedImages.length === 0 ? (
+                      <div className="flex flex-col items-center gap-3 text-gray-600">
+                        <Paperclip className="w-10 h-10" />
+                        <p className="text-[10px] font-bold uppercase tracking-widest px-4 text-center">Click o arrastra imágenes aquí</p>
                       </div>
-                    </div>
+                    ) : (
+                      <div className="absolute inset-0 p-3 overflow-y-auto">
+                        <div className="grid grid-cols-2 gap-2">
+                          {selectedImages.map((img, idx) => (
+                            <div key={idx} className="relative aspect-square rounded-lg overflow-hidden border border-white/20 bg-black/20 group/img">
+                              <img src={img} className="w-full h-full object-cover" />
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  removeSelectedImage(idx);
+                                }}
+                                className="absolute top-1 right-1 bg-red-500 p-1 rounded-full text-white opacity-0 group-hover/img:opacity-100 transition-opacity"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
 
-                {/* RESULTS SECTION */}
+                {/* Results Section - CLICK EN LAS IMÁGENES AQUÍ */}
                 {(history.length > 0 || isProcessing) && (
-                  <div className="space-y-6 pt-8 border-t border-white/10">
-                    <h3 className="text-2xl font-black uppercase tracking-tighter">Resultados</h3>
+                  <div className="space-y-3">
+                    <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500">Resultados - Click en las imágenes aquí</h3>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="grid grid-cols-2 gap-3">
                       {/* 9:16 Result */}
-                      <div className="space-y-3">
-                        <div className="text-xs font-bold uppercase tracking-widest text-gray-400">9:16</div>
+                      <div className="space-y-2">
+                        <div className="text-[9px] font-black uppercase tracking-widest text-gray-600 text-center">9:16</div>
                         {(() => {
                           const img916 = history.find(h => h.aspectRatio === '9:16');
                           if (img916) {
                             return (
-                              <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/5 group">
-                                <img src={img916.url} className="w-full h-auto" />
+                              <div
+                                className="relative overflow-hidden rounded-lg border border-white/10 bg-white/5 group cursor-pointer"
+                                onClick={() => setPreviewImage(img916.url)}
+                              >
+                                <img src={img916.url} className="w-full h-auto" alt="9:16 result" />
                                 <button
-                                  onClick={() => downloadImage(img916.url, img916.id)}
-                                  className="absolute top-4 right-4 p-3 bg-black/70 text-white rounded-xl hover:bg-black transition-all opacity-0 group-hover:opacity-100"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    downloadImage(img916.url, img916.id);
+                                  }}
+                                  className="absolute top-2 right-2 p-2 bg-black/80 text-white rounded-lg hover:bg-black transition-all opacity-0 group-hover:opacity-100"
                                 >
-                                  <Download className="w-5 h-5" />
+                                  <Download className="w-3 h-3" />
                                 </button>
                               </div>
                             );
                           } else if (isProcessing) {
                             return (
-                              <div className="aspect-[9/16] rounded-2xl border border-white/10 bg-white/5 flex items-center justify-center">
-                                <RefreshCw className="w-8 h-8 animate-spin text-gray-500" />
+                              <div className="aspect-[9/16] rounded-lg border border-white/10 bg-white/5 flex items-center justify-center">
+                                <RefreshCw className="w-6 h-6 animate-spin text-gray-500" />
                               </div>
                             );
                           }
-                          return null;
+                          return (
+                            <div className="aspect-[9/16] rounded-lg border border-dashed border-white/5 bg-white/[0.02]"></div>
+                          );
                         })()}
                       </div>
 
                       {/* 1:1 Result */}
-                      <div className="space-y-3">
-                        <div className="text-xs font-bold uppercase tracking-widest text-gray-400">1:1</div>
+                      <div className="space-y-2">
+                        <div className="text-[9px] font-black uppercase tracking-widest text-gray-600 text-center">1:1</div>
                         {(() => {
                           const img11 = history.find(h => h.aspectRatio === '1:1');
                           const img916 = history.find(h => h.aspectRatio === '9:16');
 
                           if (img11) {
                             return (
-                              <div className="relative overflow-hidden rounded-2xl border border-white/10 bg-white/5 group">
-                                <img src={img11.url} className="w-full h-auto" />
+                              <div
+                                className="relative overflow-hidden rounded-lg border border-white/10 bg-white/5 group cursor-pointer"
+                                onClick={() => setPreviewImage(img11.url)}
+                              >
+                                <img src={img11.url} className="w-full h-auto" alt="1:1 result" />
                                 <button
-                                  onClick={() => downloadImage(img11.url, img11.id)}
-                                  className="absolute top-4 right-4 p-3 bg-black/70 text-white rounded-xl hover:bg-black transition-all opacity-0 group-hover:opacity-100"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    downloadImage(img11.url, img11.id);
+                                  }}
+                                  className="absolute top-2 right-2 p-2 bg-black/80 text-white rounded-lg hover:bg-black transition-all opacity-0 group-hover:opacity-100"
                                 >
-                                  <Download className="w-5 h-5" />
+                                  <Download className="w-3 h-3" />
                                 </button>
                               </div>
                             );
                           } else if (img916 && !isProcessing) {
                             return (
-                              <div className="aspect-square rounded-2xl border border-dashed border-white/10 bg-white/5 flex items-center justify-center">
+                              <div className="aspect-square rounded-lg border border-dashed border-white/10 bg-white/5 flex items-center justify-center hover:bg-white/10 transition-colors cursor-pointer">
                                 <button
                                   onClick={() => handleGenerate1to1()}
-                                  className="flex flex-col items-center gap-3 text-gray-500 hover:text-white transition-colors"
+                                  className="flex flex-col items-center gap-2 text-gray-600 hover:text-gray-400 transition-colors"
                                 >
-                                  <Plus className="w-8 h-8" />
-                                  <span className="text-xs font-bold uppercase tracking-widest">Generar Cuadrado</span>
+                                  <Plus className="w-5 h-5" />
+                                  <span className="text-[8px] font-bold uppercase tracking-widest">Generar</span>
                                 </button>
                               </div>
                             );
                           }
-                          return null;
+                          return (
+                            <div className="aspect-square rounded-lg border border-dashed border-white/5 bg-white/[0.02]"></div>
+                          );
                         })()}
                       </div>
                     </div>
                   </div>
                 )}
 
-                {/* Empty State */}
-                {history.length === 0 && !isProcessing && (
-                  <div className="py-20 text-center space-y-6 opacity-30">
-                    <div className="w-20 h-20 bg-white/5 rounded-3xl flex items-center justify-center border border-white/10 mx-auto">
-                      {activeMode === 'fashion' ? <Layers className="w-8 h-8 text-white/40" /> : activeMode === 'iteration' ? <Repeat className="w-8 h-8 text-white/40" /> : <LayoutGrid className="w-8 h-8 text-white/40" />}
+              </div>
+
+              {/* RIGHT COLUMN: Prompt + Gallery */}
+              <div className="flex-1 flex flex-col gap-4 overflow-hidden">
+
+                {/* Prompt Input Section */}
+                <div className="space-y-3 shrink-0">
+                  <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500">Introduce el Prompt</h3>
+                  <div className="relative border border-white/10 rounded-xl bg-[#0a0a0a]/50 h-[200px] flex flex-col">
+                    <textarea
+                      value={inputText}
+                      onChange={(e) => setInputText(e.target.value)}
+                      placeholder="Aquí el usuario mete su prompt..."
+                      className="flex-1 bg-transparent p-4 focus:outline-none text-sm font-medium placeholder:text-gray-700 resize-none"
+                    />
+                    <div className="p-3 border-t border-white/5 flex justify-end">
+                      <button
+                        onClick={() => handleSend()}
+                        disabled={isProcessing || (!inputText.trim() && selectedImages.length === 0)}
+                        className={`px-6 py-2.5 rounded-lg font-bold text-[10px] uppercase tracking-wider transition-all ${isProcessing ? 'bg-gray-800 text-gray-600' : 'bg-white text-black hover:bg-gray-200'
+                          }`}
+                      >
+                        {isProcessing ? (
+                          <div className="flex items-center gap-2">
+                            <RefreshCw className="w-3 h-3 animate-spin" />
+                            <span>Generando...</span>
+                          </div>
+                        ) : (
+                          'Generar'
+                        )}
+                      </button>
                     </div>
-                    <p className="text-gray-600 max-w-lg mx-auto text-sm font-medium">
-                      {activeMode === 'generator' ? 'Añade un producto y describe el fondo deseado.' :
-                        activeMode === 'iteration' ? 'Añade un anuncio de referencia y tu producto.' :
-                          'Sube foto de la modelo y la ropa que quieres editar.'}
-                    </p>
                   </div>
-                )}
+                </div>
+
+                {/* Gallery Section */}
+                <div className="flex-1 flex flex-col overflow-hidden">
+                  <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500 mb-3 shrink-0">Galería de resultados</h3>
+                  <div className="flex-1 border border-white/10 rounded-xl bg-white/[0.02] overflow-y-auto">
+                    {history.length > 0 ? (
+                      <div className="p-4 grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                        {history.map((img) => (
+                          <div
+                            key={img.id}
+                            className="group relative aspect-square bg-white/5 rounded-lg overflow-hidden border border-white/5 hover:border-white/20 transition-all cursor-pointer"
+                            onClick={() => setPreviewImage(img.url)}
+                          >
+                            <img src={img.url} className="w-full h-full object-cover" alt="Generated" />
+                            <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  downloadImage(img.url, img.id);
+                                }}
+                                className="p-2.5 bg-white text-black rounded-lg hover:scale-110 transition-transform"
+                              >
+                                <Download className="w-4 h-4" />
+                              </button>
+                            </div>
+                            <div className="absolute bottom-0 left-0 right-0 p-2 bg-gradient-to-t from-black/80 to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
+                              <p className="text-[8px] text-gray-300 line-clamp-2">{img.aspectRatio}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="h-full flex flex-col items-center justify-center text-gray-700">
+                        <ImageIcon className="w-10 h-10 mb-3 opacity-20" />
+                        <p className="text-[10px] font-bold uppercase tracking-widest">No hay resultados aún</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
 
               </div>
             </div>
@@ -599,10 +692,20 @@ const App: React.FC = () => {
 
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                 {history.map((img) => (
-                  <div key={img.id} className="group relative aspect-[9/16] bg-white/5 rounded-xl overflow-hidden border border-white/5 hover:border-white/20 transition-all">
+                  <div
+                    key={img.id}
+                    className="group relative aspect-[9/16] bg-white/5 rounded-xl overflow-hidden border border-white/5 hover:border-white/20 transition-all cursor-pointer"
+                    onClick={() => setPreviewImage(img.url)}
+                  >
                     <img src={img.url} className="w-full h-full object-cover" />
                     <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-4 p-4 text-center">
-                      <button onClick={() => downloadImage(img.url, img.id)} className="p-3 bg-white text-black rounded-full hover:scale-110 transition-transform">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          downloadImage(img.url, img.id);
+                        }}
+                        className="p-3 bg-white text-black rounded-full hover:scale-110 transition-transform"
+                      >
                         <Download className="w-5 h-5" />
                       </button>
                       <p className="text-[10px] text-gray-300 line-clamp-3">{img.prompt}</p>
