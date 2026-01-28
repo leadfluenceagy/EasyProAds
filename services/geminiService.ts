@@ -88,6 +88,9 @@ Output Format: A single, comprehensive prompt for Imagen that includes all visua
   }
 };
 
+// Helper function to delay execution
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 export const generateImage = async (prompt: string, aspectRatio: AspectRatio, referenceImages: string[] = []): Promise<string> => {
   console.log('🚀 [generateImage] Starting image generation...');
   console.log('📝 [generateImage] Prompt length:', prompt.length);
@@ -98,7 +101,7 @@ export const generateImage = async (prompt: string, aspectRatio: AspectRatio, re
 
   const parts: Part[] = [{ text: prompt }];
 
-  // Add reference images as inline data parts (this is how it worked before!)
+  // Add reference images as inline data parts
   referenceImages.forEach((img, idx) => {
     const mimeType = img.match(/^data:(image\/[a-zA-Z+]+);base64,/)?.[1] || 'image/png';
     const base64Data = img.split(',')[1] || img;
@@ -114,46 +117,91 @@ export const generateImage = async (prompt: string, aspectRatio: AspectRatio, re
   parts.push({ text: "FINAL VERIFICATION: Absolute facial identity preservation. Photographic realism. 8K Resolution. No text. No artifacts." });
 
   console.log('🎯 [generateImage] Total parts to send:', parts.length);
-  console.log('📡 [generateImage] Calling Gemini API with model: gemini-3-pro-image-preview');
 
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-image-preview',
-      contents: { parts },
-      config: {
-        imageConfig: {
-          aspectRatio: aspectRatio,
-          imageSize: "4K"
-        },
-      },
-    });
+  // Models to try in order of preference
+  const modelsToTry = [
+    'gemini-3-pro-image-preview',
+    'gemini-2.5-flash-preview-image-generation'
+  ];
 
-    console.log('✅ [generateImage] API call successful');
-    console.log('📦 [generateImage] Response candidates:', response.candidates?.length || 0);
+  const maxRetriesPerModel = 2;
 
-    // Extract the generated image from response parts
-    let imageUrl = '';
-    if (response.candidates?.[0]?.content) {
-      console.log('🔍 [generateImage] Searching for image in response parts...');
-      for (const part of response.candidates[0].content.parts) {
-        if (part.inlineData) {
-          imageUrl = `data:image/png;base64,${part.inlineData.data}`;
-          console.log('🎉 [generateImage] Image found! Data length:', part.inlineData.data.length);
+  for (const modelName of modelsToTry) {
+    console.log(`\n🔄 [generateImage] === Trying model: ${modelName} ===`);
+
+    for (let attempt = 1; attempt <= maxRetriesPerModel; attempt++) {
+      console.log(`📡 [generateImage] Attempt ${attempt}/${maxRetriesPerModel} with ${modelName}`);
+
+      try {
+        const response = await ai.models.generateContent({
+          model: modelName,
+          contents: { parts },
+          config: {
+            responseModalities: ['TEXT', 'IMAGE'],
+            imageConfig: {
+              aspectRatio: aspectRatio,
+              imageSize: '2K'
+            },
+          },
+        });
+
+        console.log('✅ [generateImage] API call successful');
+        console.log('📦 [generateImage] Response candidates:', response.candidates?.length || 0);
+
+        // Extract the generated image from response parts
+        let imageUrl = '';
+        if (response.candidates?.[0]?.content) {
+          console.log('🔍 [generateImage] Searching for image in response parts...');
+          for (const part of response.candidates[0].content.parts) {
+            if (part.inlineData) {
+              imageUrl = `data:image/png;base64,${part.inlineData.data}`;
+              console.log('🎉 [generateImage] Image found! Data length:', part.inlineData.data.length);
+              break;
+            }
+          }
+        }
+
+        if (imageUrl) {
+          console.log(`✨ [generateImage] Success with ${modelName}!`);
+          return imageUrl;
+        }
+
+        console.warn('⚠️ [generateImage] No image in response');
+        throw new Error('No image in response');
+
+      } catch (error: any) {
+        const errorMessage = error?.message || String(error);
+        const isOverloaded = errorMessage.includes('503') ||
+          errorMessage.includes('overloaded') ||
+          errorMessage.includes('UNAVAILABLE') ||
+          errorMessage.includes('Resource exhausted');
+
+        console.error(`💥 [generateImage] Error with ${modelName} (attempt ${attempt}):`, errorMessage);
+
+        if (isOverloaded && attempt < maxRetriesPerModel) {
+          const waitTime = attempt * 3000; // 3s, 6s
+          console.log(`⏳ [generateImage] Model overloaded, waiting ${waitTime / 1000}s before retry...`);
+          await delay(waitTime);
+          continue;
+        }
+
+        // If overloaded on last attempt, break to try next model
+        if (isOverloaded) {
+          console.log(`🔀 [generateImage] ${modelName} overloaded, switching to next model...`);
           break;
         }
+
+        // Non-overload error on primary model - try fallback
+        if (modelName === modelsToTry[0]) {
+          console.log(`⚠️ [generateImage] Error with primary model, trying fallback...`);
+          break;
+        }
+
+        // Non-overload error on fallback - throw
+        throw error;
       }
     }
-
-    if (!imageUrl) {
-      console.error('❌ [generateImage] No image in response');
-      console.error('Response structure:', JSON.stringify(response, null, 2));
-      throw new Error('Generation failed. No image in response.');
-    }
-
-    console.log('✨ [generateImage] Image generation complete!');
-    return imageUrl;
-  } catch (error) {
-    console.error('💥 [generateImage] Error during generation:', error);
-    throw error;
   }
+
+  throw new Error('Image generation failed: All models are currently overloaded. Please try again in a few minutes.');
 };
