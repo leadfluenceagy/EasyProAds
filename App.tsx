@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ChatMessage, GeneratedImage, AspectRatio, ChatMode } from './types';
-import { professionalizePrompt, generateImage } from './services/geminiService';
+import { professionalizePrompt, generateImage, optimizeEditorPrompt, generateEditorImage, optimizeFormatPrompt, generateFormatImage } from './services/geminiService';
 import { supabase } from './services/supabase';
 import { Auth } from './components/Auth';
 import { Feedback } from './components/Feedback';
@@ -24,7 +24,11 @@ import {
   Settings,
   LogOut,
   MessageSquare,
-  User
+  User,
+  Paintbrush,
+  Eraser,
+  Minus,
+  ArrowRight
 } from 'lucide-react';
 
 // Fix: Use explicit global declaration for aistudio to avoid type conflicts and resolve Blob error
@@ -38,7 +42,7 @@ declare global {
   }
 }
 
-type View = 'workspace' | 'gallery' | 'settings' | 'feedback';
+type View = 'workspace' | 'gallery' | 'settings' | 'feedback' | 'editor';
 
 const App: React.FC = () => {
   const [session, setSession] = useState<Session | null>(null);
@@ -109,8 +113,39 @@ const App: React.FC = () => {
   const [lastPrompt, setLastPrompt] = useState<string>('');
   const [previewImage, setPreviewImage] = useState<string | null>(null);
 
+  // Editor-specific state
+  const [editorImage916, setEditorImage916] = useState<string | null>(null);
+  const [editorImage11, setEditorImage11] = useState<string | null>(null);
+  const [showBrushModal, setShowBrushModal] = useState(false);
+  const [brushSize, setBrushSize] = useState(30);
+  const [mask916Data, setMask916Data] = useState<string | null>(null);
+  const [mask11Data, setMask11Data] = useState<string | null>(null);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [activeEditImage, setActiveEditImage] = useState<'916' | '11'>('916');
+
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const editorInput916Ref = useRef<HTMLInputElement>(null);
+  const editorInput11Ref = useRef<HTMLInputElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const imageRef = useRef<HTMLImageElement>(null);
+
+  // Editor prompt and results state
+  const [editorPrompt, setEditorPrompt] = useState('');
+  const [editorResult916, setEditorResult916] = useState<string | null>(null);
+  const [editorResult11, setEditorResult11] = useState<string | null>(null);
+  const [isEditorProcessing, setIsEditorProcessing] = useState(false);
+  const [editorStatus, setEditorStatus] = useState('');
+
+  // Format section state
+  const [formatInput916, setFormatInput916] = useState<string | null>(null);
+  const [formatInput11, setFormatInput11] = useState<string | null>(null);
+  const [formatResult916, setFormatResult916] = useState<string | null>(null);
+  const [formatResult11, setFormatResult11] = useState<string | null>(null);
+  const [isFormatProcessing, setIsFormatProcessing] = useState(false);
+  const [formatStatus, setFormatStatus] = useState('');
+  const formatInput916Ref = useRef<HTMLInputElement>(null);
+  const formatInput11Ref = useRef<HTMLInputElement>(null);
 
   const activeMessages = messagesByMode[activeMode];
 
@@ -147,6 +182,141 @@ const App: React.FC = () => {
       reader.readAsDataURL(file);
     });
     e.target.value = '';
+  };
+
+  // Editor image handlers
+  const handleEditor916Change = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || !e.target.files[0]) return;
+    const file = e.target.files[0];
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setEditorImage916(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const handleEditor11Change = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || !e.target.files[0]) return;
+    const file = e.target.files[0];
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setEditorImage11(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  // Editor generate function
+  const handleEditorGenerate = async () => {
+    if (!editorPrompt.trim() || isEditorProcessing) return;
+    if (!editorImage916 && !editorImage11) return;
+
+    setIsEditorProcessing(true);
+    setEditorStatus('Analizando imagen y prompt...');
+
+    try {
+      // Generate for 9:16 image if present
+      if (editorImage916) {
+        setEditorStatus('Optimizando prompt para 9:16...');
+        const optimizedPrompt916 = await optimizeEditorPrompt(
+          editorPrompt,
+          editorImage916,
+          mask916Data
+        );
+        console.log('📝 Optimized 9:16 prompt:', optimizedPrompt916);
+
+        setEditorStatus('Generando imagen 9:16...');
+        const result916 = await generateEditorImage(optimizedPrompt916, editorImage916, '9:16');
+        setEditorResult916(result916);
+      }
+
+      // Generate for 1:1 image if present
+      if (editorImage11) {
+        setEditorStatus('Optimizando prompt para 1:1...');
+        const optimizedPrompt11 = await optimizeEditorPrompt(
+          editorPrompt,
+          editorImage11,
+          mask11Data
+        );
+        console.log('📝 Optimized 1:1 prompt:', optimizedPrompt11);
+
+        setEditorStatus('Generando imagen 1:1...');
+        const result11 = await generateEditorImage(optimizedPrompt11, editorImage11, '1:1');
+        setEditorResult11(result11);
+      }
+
+      setEditorStatus('¡Completado!');
+    } catch (error: any) {
+      console.error('❌ Editor generation failed:', error);
+      setEditorStatus(`Error: ${error?.message || 'Unknown error'}`);
+    } finally {
+      setIsEditorProcessing(false);
+    }
+  };
+
+  // Format section handlers
+  const handleFormatInput916Change = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setFormatInput916(reader.result as string);
+      setFormatResult11(null); // Reset result
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const handleFormatInput11Change = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setFormatInput11(reader.result as string);
+      setFormatResult916(null); // Reset result
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const handleFormatGenerate = async () => {
+    if (isFormatProcessing) return;
+    if (!formatInput916 && !formatInput11) return;
+
+    setIsFormatProcessing(true);
+    setFormatStatus('Analizando imagen...');
+
+    try {
+      // Convert 9:16 to 1:1
+      if (formatInput916) {
+        setFormatStatus('Generando prompt para 9:16 → 1:1...');
+        const optimizedPrompt = await optimizeFormatPrompt(formatInput916, '9:16');
+        console.log('📐 Format prompt (9:16→1:1):', optimizedPrompt);
+
+        setFormatStatus('Generando imagen 1:1...');
+        const result = await generateFormatImage(optimizedPrompt, formatInput916, '1:1');
+        setFormatResult11(result);
+      }
+
+      // Convert 1:1 to 9:16
+      if (formatInput11) {
+        setFormatStatus('Generando prompt para 1:1 → 9:16...');
+        const optimizedPrompt = await optimizeFormatPrompt(formatInput11, '1:1');
+        console.log('📐 Format prompt (1:1→9:16):', optimizedPrompt);
+
+        setFormatStatus('Generando imagen 9:16...');
+        const result = await generateFormatImage(optimizedPrompt, formatInput11, '9:16');
+        setFormatResult916(result);
+      }
+
+      setFormatStatus('¡Completado!');
+    } catch (error: any) {
+      console.error('❌ Format generation failed:', error);
+      setFormatStatus(`Error: ${error?.message || 'Unknown error'}`);
+    } finally {
+      setIsFormatProcessing(false);
+    }
   };
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -385,6 +555,15 @@ const App: React.FC = () => {
           </div>
 
           <div className="flex-1 flex flex-col justify-end p-4 gap-2">
+            <button
+              onClick={() => setCurrentView('editor')}
+              className={`flex items-center gap-3 px-4 py-4 rounded-2xl transition-all font-bold text-[11px] uppercase tracking-tight group ${currentView === 'editor' ? 'bg-white text-black shadow-lg' : 'hover:bg-white/5 text-gray-400'
+                }`}
+            >
+              <Paintbrush className="w-6 h-6 shrink-0" />
+              <span className="hidden lg:block">Editor</span>
+            </button>
+
             <button
               onClick={() => setCurrentView('feedback')}
               className={`flex items-center gap-3 px-4 py-4 rounded-2xl transition-all font-bold text-[11px] uppercase tracking-tight group ${currentView === 'feedback' ? 'bg-white text-black shadow-lg' : 'hover:bg-white/5 text-gray-400'
@@ -833,6 +1012,448 @@ const App: React.FC = () => {
           {/* VIEW: FEEDBACK */}
           {currentView === 'feedback' && (
             <Feedback />
+          )}
+
+          {/* VIEW: EDITOR */}
+          {currentView === 'editor' && (
+            <div className="h-full flex flex-col p-6 overflow-hidden">
+              {/* Hidden file inputs for Editor */}
+              <input type="file" ref={editorInput916Ref} onChange={handleEditor916Change} className="hidden" accept="image/*" />
+              <input type="file" ref={editorInput11Ref} onChange={handleEditor11Change} className="hidden" accept="image/*" />
+              {/* Hidden file inputs for Format */}
+              <input type="file" ref={formatInput916Ref} onChange={handleFormatInput916Change} className="hidden" accept="image/*" />
+              <input type="file" ref={formatInput11Ref} onChange={handleFormatInput11Change} className="hidden" accept="image/*" />
+
+              {/* Brush Modal - Canvas Painting Editor */}
+              {showBrushModal && (editorImage916 || editorImage11) && (
+                <div
+                  className="fixed inset-0 z-50 bg-black/95 backdrop-blur-sm flex flex-col items-center justify-center p-4"
+                  onClick={(e) => e.target === e.currentTarget && setShowBrushModal(false)}
+                >
+                  {/* Toolbar */}
+                  <div className="flex items-center gap-4 mb-4 p-3 bg-white/10 rounded-xl border border-white/20">
+                    {/* Image selector tabs */}
+                    {editorImage916 && editorImage11 && (
+                      <div className="flex gap-2 mr-4 pr-4 border-r border-white/20">
+                        <button
+                          onClick={() => {
+                            // Auto-save current mask before switching
+                            const canvas = canvasRef.current;
+                            if (canvas && activeEditImage === '11') {
+                              setMask11Data(canvas.toDataURL('image/png'));
+                            }
+                            setActiveEditImage('916');
+                          }}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all ${activeEditImage === '916' ? 'bg-white text-black' : 'text-gray-400 hover:text-white'
+                            }`}
+                        >
+                          9:16
+                        </button>
+                        <button
+                          onClick={() => {
+                            // Auto-save current mask before switching
+                            const canvas = canvasRef.current;
+                            if (canvas && activeEditImage === '916') {
+                              setMask916Data(canvas.toDataURL('image/png'));
+                            }
+                            setActiveEditImage('11');
+                          }}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all ${activeEditImage === '11' ? 'bg-white text-black' : 'text-gray-400 hover:text-white'
+                            }`}
+                        >
+                          1:1
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Brush size control */}
+                    <div className="flex items-center gap-2">
+                      <Paintbrush className="w-4 h-4 text-gray-400" />
+                      <button
+                        onClick={() => setBrushSize(prev => Math.max(5, prev - 10))}
+                        className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 transition-colors"
+                      >
+                        <Minus className="w-3 h-3" />
+                      </button>
+                      <span className="text-xs font-bold w-8 text-center">{brushSize}</span>
+                      <button
+                        onClick={() => setBrushSize(prev => Math.min(100, prev + 10))}
+                        className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 transition-colors"
+                      >
+                        <Plus className="w-3 h-3" />
+                      </button>
+                    </div>
+
+                    {/* Clear mask button */}
+                    <button
+                      onClick={() => {
+                        const canvas = canvasRef.current;
+                        if (canvas) {
+                          const ctx = canvas.getContext('2d');
+                          if (ctx) {
+                            ctx.clearRect(0, 0, canvas.width, canvas.height);
+                          }
+                        }
+                      }}
+                      className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 transition-colors text-xs font-bold uppercase"
+                    >
+                      <Eraser className="w-4 h-4" />
+                      Limpiar
+                    </button>
+
+                    {/* Save and close */}
+                    <button
+                      onClick={() => {
+                        const canvas = canvasRef.current;
+                        if (canvas) {
+                          const maskData = canvas.toDataURL('image/png');
+                          if (activeEditImage === '916') {
+                            setMask916Data(maskData);
+                          } else {
+                            setMask11Data(maskData);
+                          }
+                        }
+                        setShowBrushModal(false);
+                      }}
+                      className="px-4 py-1.5 rounded-lg bg-white text-black text-xs font-bold uppercase hover:bg-gray-200 transition-colors"
+                    >
+                      Guardar
+                    </button>
+
+                    {/* Close */}
+                    <button
+                      onClick={() => setShowBrushModal(false)}
+                      className="p-2 rounded-lg bg-white/5 hover:bg-red-500/20 text-gray-400 hover:text-red-400 transition-colors"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  {/* Canvas container */}
+                  <div className="relative rounded-xl overflow-hidden shadow-2xl border border-white/10">
+                    <img
+                      ref={imageRef}
+                      src={activeEditImage === '916' ? editorImage916! : editorImage11!}
+                      alt="Edit"
+                      className="max-h-[75vh] object-contain"
+                      onLoad={(e) => {
+                        const img = e.currentTarget;
+                        const canvas = canvasRef.current;
+                        if (canvas) {
+                          canvas.width = img.clientWidth;
+                          canvas.height = img.clientHeight;
+                          // Restore existing mask if any
+                          const existingMask = activeEditImage === '916' ? mask916Data : mask11Data;
+                          if (existingMask) {
+                            const ctx = canvas.getContext('2d');
+                            const maskImg = new Image();
+                            maskImg.onload = () => {
+                              ctx?.drawImage(maskImg, 0, 0, canvas.width, canvas.height);
+                            };
+                            maskImg.src = existingMask;
+                          }
+                        }
+                      }}
+                    />
+                    <canvas
+                      ref={canvasRef}
+                      className="absolute inset-0 cursor-crosshair"
+                      style={{ mixBlendMode: 'normal' }}
+                      onMouseDown={(e) => {
+                        setIsDrawing(true);
+                        const canvas = canvasRef.current;
+                        if (canvas) {
+                          const rect = canvas.getBoundingClientRect();
+                          const x = e.clientX - rect.left;
+                          const y = e.clientY - rect.top;
+                          const ctx = canvas.getContext('2d');
+                          if (ctx) {
+                            ctx.beginPath();
+                            ctx.arc(x, y, brushSize / 2, 0, Math.PI * 2);
+                            ctx.fillStyle = 'rgba(255, 0, 100, 0.5)';
+                            ctx.fill();
+                          }
+                        }
+                      }}
+                      onMouseMove={(e) => {
+                        if (!isDrawing) return;
+                        const canvas = canvasRef.current;
+                        if (canvas) {
+                          const rect = canvas.getBoundingClientRect();
+                          const x = e.clientX - rect.left;
+                          const y = e.clientY - rect.top;
+                          const ctx = canvas.getContext('2d');
+                          if (ctx) {
+                            ctx.beginPath();
+                            ctx.arc(x, y, brushSize / 2, 0, Math.PI * 2);
+                            ctx.fillStyle = 'rgba(255, 0, 100, 0.5)';
+                            ctx.fill();
+                          }
+                        }
+                      }}
+                      onMouseUp={() => setIsDrawing(false)}
+                      onMouseLeave={() => setIsDrawing(false)}
+                    />
+                  </div>
+
+                  {/* Instructions */}
+                  <p className="mt-4 text-xs text-gray-500 uppercase tracking-widest">
+                    Pinta las zonas que quieres que la IA modifique
+                  </p>
+                </div>
+              )}
+
+              {/* Main Layout: Two Sections Side by Side */}
+              <div className="flex-1 flex gap-8 overflow-hidden">
+
+                {/* LEFT SECTION: FORMATOS */}
+                <div className="flex flex-col border-r border-white/10 pr-8">
+                  <h2 className="text-lg font-black uppercase tracking-tight mb-4 text-center">Formatos</h2>
+
+                  {/* 9:16 → 1:1 Row */}
+                  <div className="flex items-center gap-3 mb-4">
+                    {/* Input 9:16 */}
+                    <div className="flex flex-col gap-1">
+                      <div
+                        className="w-[100px] h-[178px] border-2 border-dashed border-white/20 rounded-lg bg-white/5 hover:bg-white/10 transition-colors flex flex-col items-center justify-center cursor-pointer group overflow-hidden"
+                        onClick={() => formatInput916Ref.current?.click()}
+                      >
+                        {formatInput916 ? (
+                          <img src={formatInput916} alt="9:16" className="w-full h-full object-cover" />
+                        ) : (
+                          <>
+                            <Paperclip className="w-5 h-5 text-gray-600 group-hover:text-gray-400 transition-colors" />
+                            <p className="text-[8px] font-bold uppercase tracking-widest text-gray-600 mt-1">9:16</p>
+                          </>
+                        )}
+                      </div>
+                      <p className="text-[8px] font-bold uppercase tracking-widest text-gray-500 text-center">añade 9:16</p>
+                    </div>
+
+                    {/* Arrow */}
+                    <ArrowRight className="w-5 h-5 text-gray-600" />
+
+                    {/* Output 1:1 */}
+                    <div
+                      className={`w-[100px] h-[100px] border rounded-lg overflow-hidden cursor-pointer ${formatResult11 ? 'border-white/20' : 'border-dashed border-white/10 bg-white/[0.02]'
+                        }`}
+                      onClick={() => formatResult11 && setPreviewImage(formatResult11)}
+                    >
+                      {formatResult11 ? (
+                        <img src={formatResult11} alt="Result 1:1" className="w-full h-full object-cover" />
+                      ) : isFormatProcessing && formatInput916 ? (
+                        <div className="w-full h-full flex items-center justify-center">
+                          <RefreshCw className="w-4 h-4 animate-spin text-gray-600" />
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  {/* 1:1 → 9:16 Row */}
+                  <div className="flex items-center gap-3 mb-4">
+                    {/* Input 1:1 */}
+                    <div className="flex flex-col gap-1">
+                      <div
+                        className="w-[100px] h-[100px] border-2 border-dashed border-white/20 rounded-lg bg-white/5 hover:bg-white/10 transition-colors flex flex-col items-center justify-center cursor-pointer group overflow-hidden"
+                        onClick={() => formatInput11Ref.current?.click()}
+                      >
+                        {formatInput11 ? (
+                          <img src={formatInput11} alt="1:1" className="w-full h-full object-cover" />
+                        ) : (
+                          <>
+                            <Paperclip className="w-5 h-5 text-gray-600 group-hover:text-gray-400 transition-colors" />
+                            <p className="text-[8px] font-bold uppercase tracking-widest text-gray-600 mt-1">1:1</p>
+                          </>
+                        )}
+                      </div>
+                      <p className="text-[8px] font-bold uppercase tracking-widest text-gray-500 text-center">añade 1:1</p>
+                    </div>
+
+                    {/* Arrow */}
+                    <ArrowRight className="w-5 h-5 text-gray-600" />
+
+                    {/* Output 9:16 */}
+                    <div
+                      className={`w-[100px] h-[178px] border rounded-lg overflow-hidden cursor-pointer ${formatResult916 ? 'border-white/20' : 'border-dashed border-white/10 bg-white/[0.02]'
+                        }`}
+                      onClick={() => formatResult916 && setPreviewImage(formatResult916)}
+                    >
+                      {formatResult916 ? (
+                        <img src={formatResult916} alt="Result 9:16" className="w-full h-full object-cover" />
+                      ) : isFormatProcessing && formatInput11 ? (
+                        <div className="w-full h-full flex items-center justify-center">
+                          <RefreshCw className="w-4 h-4 animate-spin text-gray-600" />
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  {/* Status */}
+                  {formatStatus && (
+                    <p className={`text-[10px] font-medium mb-2 ${formatStatus.includes('Error') ? 'text-red-400' : 'text-gray-400'}`}>
+                      {formatStatus}
+                    </p>
+                  )}
+
+                  {/* Generate Button */}
+                  <button
+                    onClick={handleFormatGenerate}
+                    disabled={isFormatProcessing || (!formatInput916 && !formatInput11)}
+                    className={`w-full py-2 rounded-lg font-bold text-[10px] uppercase tracking-wider transition-all flex items-center justify-center gap-2 ${isFormatProcessing || (!formatInput916 && !formatInput11)
+                      ? 'bg-gray-800 text-gray-600 cursor-not-allowed'
+                      : 'bg-white text-black hover:bg-gray-200'
+                      }`}
+                  >
+                    {isFormatProcessing ? (
+                      <>
+                        <RefreshCw className="w-3 h-3 animate-spin" />
+                        Procesando...
+                      </>
+                    ) : (
+                      'Convertir'
+                    )}
+                  </button>
+                </div>
+
+                {/* RIGHT SECTION: EDITOR */}
+                <div className="flex-1 flex flex-col overflow-hidden">
+                  <h2 className="text-lg font-black uppercase tracking-tight mb-4 text-center">Editor</h2>
+
+                  {/* Editor Content */}
+                  <div className="flex-1 flex gap-6 overflow-hidden">
+                    {/* Image Upload Zones */}
+                    <div className="flex gap-4">
+                      {/* 9:16 Zone */}
+                      <div className="flex flex-col gap-2">
+                        <div
+                          className="w-[180px] h-[320px] border-2 border-dashed border-white/20 rounded-xl bg-white/5 hover:bg-white/10 transition-colors flex flex-col items-center justify-center cursor-pointer group overflow-hidden"
+                          onClick={() => editorInput916Ref.current?.click()}
+                        >
+                          {editorImage916 ? (
+                            <img src={editorImage916} alt="9:16" className="w-full h-full object-cover" />
+                          ) : (
+                            <>
+                              <Paperclip className="w-8 h-8 text-gray-600 group-hover:text-gray-400 transition-colors" />
+                              <p className="text-[10px] font-bold uppercase tracking-widest text-gray-600 mt-2">Click para añadir</p>
+                            </>
+                          )}
+                        </div>
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-gray-500 text-center">añade 9:16</p>
+                      </div>
+
+                      {/* 1:1 Zone */}
+                      <div className="flex flex-col gap-2">
+                        <div
+                          className="w-[180px] h-[180px] border-2 border-dashed border-white/20 rounded-xl bg-white/5 hover:bg-white/10 transition-colors flex flex-col items-center justify-center cursor-pointer group overflow-hidden"
+                          onClick={() => editorInput11Ref.current?.click()}
+                        >
+                          {editorImage11 ? (
+                            <img src={editorImage11} alt="1:1" className="w-full h-full object-cover" />
+                          ) : (
+                            <>
+                              <Paperclip className="w-8 h-8 text-gray-600 group-hover:text-gray-400 transition-colors" />
+                              <p className="text-[10px] font-bold uppercase tracking-widest text-gray-600 mt-2">Click para añadir</p>
+                            </>
+                          )}
+                        </div>
+                        <p className="text-[10px] font-bold uppercase tracking-widest text-gray-500 text-center">añade 1:1</p>
+                      </div>
+                    </div>
+
+                    {/* Right Section: Prompt + Brush Button */}
+                    <div className="flex-1 flex flex-col gap-4 max-w-md">
+                      {/* Prompt Area */}
+                      <div className="border border-white/10 rounded-xl bg-[#0a0a0a]/50 p-4 flex-1 flex flex-col">
+                        <textarea
+                          value={editorPrompt}
+                          onChange={(e) => setEditorPrompt(e.target.value)}
+                          placeholder="añade el prompt para cambiar (ej: 'cambia el fondo a una playa')"
+                          className="flex-1 bg-transparent focus:outline-none text-sm font-medium placeholder:text-gray-600 resize-none"
+                        />
+                      </div>
+
+                      {/* Status */}
+                      {editorStatus && (
+                        <p className={`text-xs font-medium ${editorStatus.includes('Error') ? 'text-red-400' : 'text-gray-400'}`}>
+                          {editorStatus}
+                        </p>
+                      )}
+
+                      {/* Brush Button */}
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={() => (editorImage916 || editorImage11) && setShowBrushModal(true)}
+                          className={`p-3 border border-white/20 rounded-xl transition-colors group ${(editorImage916 || editorImage11)
+                            ? 'bg-white/5 hover:bg-white/10 cursor-pointer'
+                            : 'bg-white/[0.02] cursor-not-allowed opacity-50'
+                            }`}
+                          title={editorImage916 || editorImage11 ? "Pintar zonas a editar" : "Sube imágenes primero"}
+                        >
+                          <Paintbrush className="w-5 h-5 text-gray-500 group-hover:text-white transition-colors" />
+                        </button>
+                        {(mask916Data || mask11Data) && (
+                          <span className="text-[10px] text-green-400 font-bold uppercase">Máscara guardada</span>
+                        )}
+                      </div>
+
+                      {/* Generate Button */}
+                      <button
+                        onClick={handleEditorGenerate}
+                        disabled={isEditorProcessing || (!editorImage916 && !editorImage11) || !editorPrompt.trim()}
+                        className={`w-full py-3 rounded-xl font-bold text-[11px] uppercase tracking-wider transition-all flex items-center justify-center gap-2 ${isEditorProcessing || (!editorImage916 && !editorImage11) || !editorPrompt.trim()
+                          ? 'bg-gray-800 text-gray-600 cursor-not-allowed'
+                          : 'bg-white text-black hover:bg-gray-200'
+                          }`}
+                      >
+                        {isEditorProcessing ? (
+                          <>
+                            <RefreshCw className="w-4 h-4 animate-spin" />
+                            Procesando...
+                          </>
+                        ) : (
+                          'Generar'
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Results Section */}
+                  <div className="mt-6">
+                    <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500 mb-3">Resultado:</h3>
+                    <div className="flex gap-4">
+                      {/* Result 9:16 */}
+                      <div
+                        className={`w-[140px] h-[250px] border rounded-xl overflow-hidden cursor-pointer ${editorResult916 ? 'border-white/20' : 'border-dashed border-white/10 bg-white/[0.02]'
+                          }`}
+                        onClick={() => editorResult916 && setPreviewImage(editorResult916)}
+                      >
+                        {editorResult916 ? (
+                          <img src={editorResult916} alt="Result 9:16" className="w-full h-full object-cover" />
+                        ) : isEditorProcessing && editorImage916 ? (
+                          <div className="w-full h-full flex items-center justify-center">
+                            <RefreshCw className="w-6 h-6 animate-spin text-gray-600" />
+                          </div>
+                        ) : null}
+                      </div>
+                      {/* Result 1:1 */}
+                      <div
+                        className={`w-[120px] h-[120px] border rounded-xl overflow-hidden cursor-pointer ${editorResult11 ? 'border-white/20' : 'border-dashed border-white/10 bg-white/[0.02]'
+                          }`}
+                        onClick={() => editorResult11 && setPreviewImage(editorResult11)}
+                      >
+                        {editorResult11 ? (
+                          <img src={editorResult11} alt="Result 1:1" className="w-full h-full object-cover" />
+                        ) : isEditorProcessing && editorImage11 ? (
+                          <div className="w-full h-full flex items-center justify-center">
+                            <RefreshCw className="w-6 h-6 animate-spin text-gray-600" />
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
           )}
 
         </div>
