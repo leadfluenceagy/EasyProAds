@@ -1,7 +1,7 @@
 // Diagnostic script to test Gemini API image generation
 import { GoogleGenAI } from '@google/genai';
 
-const API_KEY = 'AIzaSyC5FcaUCE93Hg6YIgQGrFzPVBkDqoY8wEY';
+const API_KEY = 'AIzaSyC7POOnfNazBXSTl7GlVnDJ6xnedYwtEDA';
 
 async function testModels() {
     const ai = new GoogleGenAI({ apiKey: API_KEY });
