@@ -3,15 +3,45 @@ import { AspectRatio, ChatMode } from "../types";
 
 const GENERATOR_PROMPT = `
 You are an elite Visual Strategist for high-end commercial advertising.
-Your goal: Take a user's idea or an object from an image and place it in a breathtaking, professional environment.
-STRICT VISUAL CONSTRAINTS: NO studio gear, luxury environments, cinematic lighting, NO TEXT.
+
+PRODUCT DESIGN PRESERVATION RULE:
+The product/object from the reference image MUST maintain its EXACT DESIGN:
+- EXACT same colors, textures, and materials
+- EXACT same logos, labels, patterns, and all visual details
+- EXACT same proportions and scale relative to itself
+- DO NOT modify, improve, recolor, or redesign the product
+
+WHAT YOU CAN CHANGE:
+- Product POSITION in the scene (angle, rotation, tilt, orientation)
+- Product PLACEMENT (where it sits in the composition)
+- Environment, background, lighting, shadows, reflections
+
+WHAT YOU CANNOT CHANGE:
+- Any aspect of the product's actual DESIGN or APPEARANCE
+- Colors, logos, textures, patterns, labels, or visual details of the product
+
+YOUR JOB: Place this product (with unchanged design) in an appropriate, stunning environment. You may reposition/rotate the product naturally in the scene.
+
+STRICT VISUAL CONSTRAINTS: NO studio gear visible, luxury environments preferred, cinematic lighting, NO TEXT anywhere.
 `;
 
 const ITERATION_PROMPT = `
-You are a Lead Creative Director. 
-Task: Recreate exact composition, lighting, and style from reference ad, replacing the original product with a new one.
-WORKFLOW: PRODUCT REPLACEMENT IN AD. 
-Match perspective, scale, and lighting. REMOVE ALL TEXT/LOGOS.
+You are a Lead Creative Director specializing in product photography.
+
+PRODUCT DESIGN PRESERVATION RULE:
+The product from the reference image MUST maintain its EXACT DESIGN:
+- EXACT same colors, textures, logos, patterns, and all visual details
+- DO NOT modify, recolor, redesign, or reinterpret the product's appearance
+
+WHAT YOU CAN CHANGE:
+- Product POSITION (angle, rotation, orientation in the scene)
+- Product PLACEMENT in the composition
+- The entire ENVIRONMENT and STYLE around the product
+
+Task: Take the product (with unchanged design) and place it into a scene that matches the style, composition, lighting, and perspective of the reference advertisement. You can reposition the product naturally.
+
+MATCH: lighting direction, color grading, mood, visual style.
+REMOVE: All text and watermarks from the ENVIRONMENT (keep product logos intact).
 `;
 
 const FASHION_PROMPT = `
@@ -116,16 +146,30 @@ export const professionalizePrompt = async (input: string, mode: ChatMode, image
   // Enhanced instruction when images are present
   const hasImages = imagesBase64.length > 0;
   const imageAnalysisInstruction = hasImages
-    ? `\n\nCRITICAL IMAGE ANALYSIS REQUIRED:
-You are analyzing ${imagesBase64.length} reference image(s). You MUST:
-1. Describe EVERY visible object, product, person, or subject in extreme detail
-2. Note exact colors (hex codes if possible), materials, textures, shapes, sizes
-3. Describe lighting, shadows, perspective, and composition
-4. List all visible text, logos, or branding (to be removed if needed)
-5. Identify the environment, setting, and background elements
-6. Your output prompt MUST be so detailed that an image generator can recreate these objects/subjects without seeing the original images
+    ? `\n\nCRITICAL IMAGE ANALYSIS - PRODUCT DESIGN PRESERVATION:
+You are analyzing ${imagesBase64.length} reference image(s) containing a PRODUCT whose DESIGN must be preserved exactly.
 
-Output Format: A single, comprehensive prompt for Imagen that includes all visual details from the reference images combined with the user's request.`
+STEP 1 - DOCUMENT THE PRODUCT DESIGN:
+- Note EVERY color with precision (hex codes preferred)
+- Document ALL visible logos, labels, text, patterns, and design details
+- Describe materials and textures (glossy, matte, metallic, fabric type, etc.)
+- These design elements CANNOT change
+
+STEP 2 - UNDERSTAND WHAT CAN CHANGE:
+- Product POSITION: Can be rotated, tilted, angled differently
+- Product PLACEMENT: Can be positioned anywhere in the scene
+- ENVIRONMENT: Can be completely changed
+
+STEP 3 - UNDERSTAND WHAT CANNOT CHANGE:
+- Product DESIGN: Colors, logos, textures, patterns, labels
+- Product APPEARANCE: Must look identical, just from a different angle/position if needed
+
+OUTPUT FORMAT:
+Generate a prompt that:
+1. Describes the product design in extreme detail (colors, logos, textures, materials)
+2. Emphasizes "PRESERVE EXACT PRODUCT DESIGN - same colors, logos, textures"
+3. Describes the new environment/scene
+4. Allows natural repositioning of the product in the scene`
     : '';
 
   const parts: Part[] = [
@@ -150,7 +194,7 @@ Output Format: A single, comprehensive prompt for Imagen that includes all visua
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-lite-preview-09-2025',
+      model: 'gemini-2.5-flash',
       contents: [{ role: 'user', parts: parts }],
       config: {
         systemInstruction,
@@ -193,14 +237,14 @@ export const generateImage = async (prompt: string, aspectRatio: AspectRatio, re
     });
   });
 
-  parts.push({ text: "FINAL VERIFICATION: Absolute facial identity preservation. Photographic realism. 8K Resolution. No text. No artifacts." });
+  parts.push({ text: "CRITICAL REQUIREMENTS: 1) PRESERVE EXACT PRODUCT DESIGN - same colors, logos, textures, patterns, and all visual details from reference. 2) You MAY reposition the product naturally in the scene (rotate, tilt, angle). 3) Create a stunning environment around the product. 4) Photorealistic 8K quality. 5) No text overlays. 6) No artifacts." });
 
   console.log('🎯 [generateImage] Total parts to send:', parts.length);
 
   // Models to try in order of preference
   const modelsToTry = [
     'gemini-3-pro-image-preview',
-    'gemini-2.5-flash-preview-image-generation'
+    'gemini-2.5-flash-image'
   ];
 
   const maxRetriesPerModel = 2;
@@ -340,7 +384,7 @@ Genera el prompt optimizado en inglés.`
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-lite-preview-09-2025',
+      model: 'gemini-2.5-flash',
       contents: [{ role: 'user', parts: parts }],
       config: {
         systemInstruction: EDITOR_PROMPT,
@@ -382,7 +426,7 @@ export const generateEditorImage = async (
 
   const modelsToTry = [
     'gemini-3-pro-image-preview',
-    'gemini-2.5-flash-preview-image-generation'
+    'gemini-2.5-flash-image'
   ];
 
   const maxRetriesPerModel = 2;
@@ -472,7 +516,7 @@ export const optimizeFormatPrompt = async (
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash-lite-preview-09-2025',
+      model: 'gemini-2.5-flash',
       contents: [{ role: 'user', parts: parts }],
       config: {
         systemInstruction: FORMAT_PROMPT,
@@ -513,7 +557,7 @@ export const generateFormatImage = async (
 
   const modelsToTry = [
     'gemini-3-pro-image-preview',
-    'gemini-2.5-flash-preview-image-generation'
+    'gemini-2.5-flash-image'
   ];
 
   const maxRetriesPerModel = 2;

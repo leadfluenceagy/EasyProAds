@@ -347,10 +347,39 @@ const App: React.FC = () => {
   };
 
   const downloadImage = (url: string, id: string) => {
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `studio-pro-${id}.png`;
-    link.click();
+    // Convert base64 data URL to Blob for proper download
+    if (url.startsWith('data:')) {
+      // Extract base64 data
+      const [header, base64Data] = url.split(',');
+      const mimeType = header.match(/data:(.*?);/)?.[1] || 'image/png';
+
+      // Decode base64 to binary
+      const binaryString = atob(base64Data);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+
+      // Create blob and download
+      const blob = new Blob([bytes], { type: mimeType });
+      const blobUrl = URL.createObjectURL(blob);
+
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = `easyproadds-${id}.png`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      // Clean up the blob URL
+      URL.revokeObjectURL(blobUrl);
+    } else {
+      // Fallback for regular URLs
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `easyproadds-${id}.png`;
+      link.click();
+    }
   };
 
   const handleSend = async (text?: string) => {
