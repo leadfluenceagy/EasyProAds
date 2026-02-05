@@ -42,7 +42,7 @@ declare global {
   }
 }
 
-type View = 'workspace' | 'gallery' | 'settings' | 'feedback' | 'editor';
+type View = 'workspace' | 'gallery' | 'settings' | 'feedback' | 'banners' | 'editor';
 
 const App: React.FC = () => {
   const [session, setSession] = useState<Session | null>(null);
@@ -146,6 +146,14 @@ const App: React.FC = () => {
   const [formatStatus, setFormatStatus] = useState('');
   const formatInput916Ref = useRef<HTMLInputElement>(null);
   const formatInput11Ref = useRef<HTMLInputElement>(null);
+
+  // Banner section state
+  const [bannerInputText, setBannerInputText] = useState('');
+  const [bannerIsProcessing, setBannerIsProcessing] = useState(false);
+  const [bannerHistory, setBannerHistory] = useState<GeneratedImage[]>([]);
+  const [bannerLastPrompt, setBannerLastPrompt] = useState('');
+  const [bannerSelectedImages, setBannerSelectedImages] = useState<string[]>([]);
+  const bannerFileInputRef = useRef<HTMLInputElement>(null);
 
   const activeMessages = messagesByMode[activeMode];
 
@@ -319,7 +327,132 @@ const App: React.FC = () => {
     }
   };
 
+  // Banner section handlers
+  const handleBannerFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files) return;
+    const files = Array.from(e.target.files) as File[];
+    files.forEach(file => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setBannerSelectedImages(prev => [...prev, reader.result as string]);
+      };
+      reader.readAsDataURL(file);
+    });
+    e.target.value = '';
+  };
+
+  const handleBannerSend = async () => {
+    if (!bannerInputText.trim() || bannerIsProcessing) return;
+
+    setBannerIsProcessing(true);
+
+    try {
+      // Banner-specific prompt optimization
+      const bannerSystemPrompt = `Eres un experto en prompt engineering especializado en generación de imágenes comerciales para e-commerce. Tu trabajo es transformar instrucciones simples del usuario en prompts detallados y optimizados para Gemini Pro 3.
+
+## Tu objetivo
+Convertir cualquier solicitud de banner en un prompt que genere imágenes profesionales, limpias y comercialmente efectivas.
+
+## Reglas de optimización
+
+### 1. Estructura del prompt de salida
+Siempre genera el prompt en este orden:
+- Tipo de imagen y propósito comercial
+- Composición y distribución del espacio
+- Producto/elemento principal (si aplica)
+- Paleta de colores y ambiente
+- Estilo visual y técnica
+- Iluminación
+- Espacio negativo para texto (CRÍTICO)
+- Detalles técnicos de calidad
+
+### 2. Principios clave para banners e-commerce
+- SIEMPRE reservar 40-60% del espacio como área limpia para texto/copy
+- Fondos que no compitan con el mensaje comercial
+- Colores que evoquen la emoción de compra deseada (urgencia, lujo, frescura, etc.)
+- Composición asimétrica: producto a un lado, espacio para copy al otro
+- Evitar elementos que distraigan del mensaje principal
+
+### 3. Palabras clave de calidad a incluir siempre
+- "professional product photography"
+- "clean commercial aesthetic"
+- "high-end advertising"
+- "soft natural lighting" o "studio lighting"
+- "negative space for text overlay"
+- "8k, sharp focus, photorealistic"
+
+### 4. Lo que NUNCA debe incluir el prompt
+- Texto renderizado (las IAs lo hacen mal)
+- Logos
+- Múltiples productos compitiendo
+- Fondos demasiado complejos
+- Personas con caras visibles (a menos que se solicite específicamente)
+
+## Formato de salida para 16:9 (desktop):
+Professional e-commerce banner, horizontal composition. [descripción del contenido y producto]. Large negative space (40-60% of frame) for text overlay. Clean minimalist aesthetic, high-end advertising style. Soft studio lighting. 8k resolution, photorealistic, sharp focus, commercial photography.
+
+Ahora, transforma la siguiente solicitud del usuario en un prompt optimizado SOLO para formato 16:9:
+"${bannerInputText}"
+
+Responde ÚNICAMENTE con el prompt optimizado en inglés. Sin explicaciones adicionales.`;
+
+      // Use professionalizePrompt but with banner-specific system prompt
+      const optimizedPrompt = await professionalizePrompt(bannerSystemPrompt, 'generator', bannerSelectedImages);
+      console.log('🎨 BANNER OPTIMIZED PROMPT (16:9):', optimizedPrompt);
+
+      setBannerLastPrompt(optimizedPrompt);
+
+      // Generate 16:9 image
+      const finalImageUrl = await generateImage(optimizedPrompt, '16:9', bannerSelectedImages);
+      console.log('✅ Banner 16:9 generated');
+
+      setBannerHistory(prev => [...prev, {
+        id: Date.now().toString(),
+        url: finalImageUrl,
+        prompt: optimizedPrompt,
+        timestamp: Date.now(),
+        aspectRatio: '16:9'
+      }]);
+
+    } catch (error: any) {
+      console.error('❌ Banner generation failed:', error);
+    } finally {
+      setBannerIsProcessing(false);
+    }
+  };
+
+  const handleBannerGenerate916 = async () => {
+    if (!bannerLastPrompt || bannerIsProcessing) return;
+
+    setBannerIsProcessing(true);
+
+    try {
+      // Adapt prompt for 9:16
+      const prompt916 = bannerLastPrompt
+        .replace('horizontal composition', 'vertical composition')
+        .replace('16:9', '9:16')
+        .replace(/left|right/gi, match => match === 'left' ? 'top' : 'bottom');
+
+      const finalImageUrl = await generateImage(prompt916, '9:16', bannerSelectedImages);
+      console.log('✅ Banner 9:16 generated');
+
+      setBannerHistory(prev => [{
+        id: Date.now().toString() + '-916',
+        url: finalImageUrl,
+        prompt: prompt916,
+        timestamp: Date.now(),
+        aspectRatio: '9:16'
+      }, ...prev]);
+
+    } catch (error: any) {
+      console.error('❌ Banner 9:16 generation failed:', error);
+    } finally {
+      setBannerIsProcessing(false);
+    }
+  };
+
   const handleDragOver = (e: React.DragEvent) => {
+
     e.preventDefault();
     e.stopPropagation();
   };
@@ -584,6 +717,15 @@ const App: React.FC = () => {
           </div>
 
           <div className="flex-1 flex flex-col justify-end p-4 gap-2">
+            <button
+              onClick={() => setCurrentView('banners')}
+              className={`flex items-center gap-3 px-4 py-4 rounded-2xl transition-all font-bold text-[11px] uppercase tracking-tight group ${currentView === 'banners' ? 'bg-white text-black shadow-lg' : 'hover:bg-white/5 text-gray-400'
+                }`}
+            >
+              <Zap className="w-6 h-6 shrink-0" />
+              <span className="hidden lg:block">Banners</span>
+            </button>
+
             <button
               onClick={() => setCurrentView('editor')}
               className={`flex items-center gap-3 px-4 py-4 rounded-2xl transition-all font-bold text-[11px] uppercase tracking-tight group ${currentView === 'editor' ? 'bg-white text-black shadow-lg' : 'hover:bg-white/5 text-gray-400'
@@ -1037,6 +1179,189 @@ const App: React.FC = () => {
               </div>
             );
           })()}
+          {/* VIEW: BANNERS */}
+          {currentView === 'banners' && (
+            <div className="h-full flex gap-4 p-4 overflow-hidden">
+              {/* Hidden file input */}
+              <input type="file" ref={bannerFileInputRef} onChange={handleBannerFileChange} className="hidden" accept="image/*" multiple />
+
+              {/* LEFT COLUMN: Input and Images */}
+              <div className="w-[380px] flex flex-col gap-4 shrink-0 overflow-y-auto">
+                {/* Add Images Section */}
+                <div className="space-y-3">
+                  <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500">Imágenes de referencia (opcional)</h3>
+                  <div
+                    className="relative border-2 border-dashed border-white/10 rounded-xl bg-white/5 hover:bg-white/10 transition-colors h-[120px] flex flex-col items-center justify-center cursor-pointer group"
+                    onClick={() => bannerFileInputRef.current?.click()}
+                  >
+                    {bannerSelectedImages.length === 0 ? (
+                      <div className="flex flex-col items-center gap-2 text-gray-600">
+                        <Paperclip className="w-6 h-6" />
+                        <p className="text-[9px] font-bold uppercase tracking-widest px-4 text-center">Click para añadir producto</p>
+                      </div>
+                    ) : (
+                      <div className="absolute inset-0 p-2 overflow-y-auto">
+                        <div className="grid grid-cols-3 gap-2">
+                          {bannerSelectedImages.map((img, idx) => (
+                            <div key={idx} className="relative aspect-square rounded-lg overflow-hidden border border-white/20 bg-black/20 group/img">
+                              <img src={img} className="w-full h-full object-cover" />
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setBannerSelectedImages(prev => prev.filter((_, i) => i !== idx));
+                                }}
+                                className="absolute top-1 right-1 bg-red-500 p-1 rounded-full text-white opacity-0 group-hover/img:opacity-100 transition-opacity"
+                              >
+                                <X className="w-2 h-2" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Results Section */}
+                <div className="space-y-3 flex-1">
+                  <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500">Resultados</h3>
+
+                  <div className="space-y-4">
+                    {/* 16:9 Result */}
+                    <div className="space-y-2">
+                      <div className="text-[9px] font-black uppercase tracking-widest text-gray-600">16:9 (Desktop)</div>
+                      {(() => {
+                        const img169 = bannerHistory.find(h => h.aspectRatio === '16:9');
+                        if (img169) {
+                          return (
+                            <div
+                              className="relative overflow-hidden rounded-lg border border-white/10 bg-white/5 group cursor-pointer"
+                              onClick={() => setPreviewImage(img169.url)}
+                            >
+                              <img src={img169.url} className="w-full h-auto" alt="16:9 result" />
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  downloadImage(img169.url, img169.id);
+                                }}
+                                className="absolute top-2 right-2 p-2 bg-black/80 text-white rounded-lg hover:bg-black transition-all opacity-0 group-hover:opacity-100"
+                              >
+                                <Download className="w-3 h-3" />
+                              </button>
+                            </div>
+                          );
+                        } else if (bannerIsProcessing) {
+                          return (
+                            <div className="aspect-video rounded-lg border border-white/10 bg-white/5 flex items-center justify-center">
+                              <RefreshCw className="w-6 h-6 animate-spin text-gray-500" />
+                            </div>
+                          );
+                        }
+                        return (
+                          <div className="aspect-video rounded-lg border border-dashed border-white/5 bg-white/[0.02] flex items-center justify-center text-gray-600 text-[9px]">
+                            No hay resultado aún
+                          </div>
+                        );
+                      })()}
+                    </div>
+
+                    {/* 9:16 Result */}
+                    <div className="space-y-2">
+                      <div className="text-[9px] font-black uppercase tracking-widest text-gray-600">9:16 (Mobile)</div>
+                      {(() => {
+                        const img916 = bannerHistory.find(h => h.aspectRatio === '9:16');
+                        const img169 = bannerHistory.find(h => h.aspectRatio === '16:9');
+
+                        if (img916) {
+                          return (
+                            <div
+                              className="relative overflow-hidden rounded-lg border border-white/10 bg-white/5 group cursor-pointer w-[140px]"
+                              onClick={() => setPreviewImage(img916.url)}
+                            >
+                              <img src={img916.url} className="w-full h-auto" alt="9:16 result" />
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  downloadImage(img916.url, img916.id);
+                                }}
+                                className="absolute top-2 right-2 p-2 bg-black/80 text-white rounded-lg hover:bg-black transition-all opacity-0 group-hover:opacity-100"
+                              >
+                                <Download className="w-3 h-3" />
+                              </button>
+                            </div>
+                          );
+                        } else if (img169 && !bannerIsProcessing) {
+                          return (
+                            <div className="w-[140px] aspect-[9/16] rounded-lg border border-dashed border-white/10 bg-white/5 flex items-center justify-center hover:bg-white/10 transition-colors cursor-pointer">
+                              <button
+                                onClick={() => handleBannerGenerate916()}
+                                className="flex flex-col items-center gap-2 text-gray-600 hover:text-gray-400 transition-colors"
+                              >
+                                <Plus className="w-5 h-5" />
+                                <span className="text-[8px] font-bold uppercase">Generar 9:16</span>
+                              </button>
+                            </div>
+                          );
+                        } else if (bannerIsProcessing && !img916) {
+                          return (
+                            <div className="w-[140px] aspect-[9/16] rounded-lg border border-white/10 bg-white/5 flex items-center justify-center">
+                              <RefreshCw className="w-4 h-4 animate-spin text-gray-500" />
+                            </div>
+                          );
+                        }
+                        return (
+                          <div className="w-[140px] aspect-[9/16] rounded-lg border border-dashed border-white/5 bg-white/[0.02]"></div>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* RIGHT COLUMN: Chat */}
+              <div className="flex-1 flex flex-col min-w-0 bg-black/20 rounded-2xl border border-white/5 overflow-hidden">
+                <div className="flex-1 flex flex-col items-center justify-center p-6">
+                  <div className="text-center space-y-4 max-w-md">
+                    <Zap className="w-12 h-12 mx-auto text-gray-700" />
+                    <h2 className="text-lg font-black uppercase tracking-wider text-gray-400">Banner Generator</h2>
+                    <p className="text-[11px] text-gray-600 leading-relaxed">
+                      Describe el banner que necesitas para tu e-commerce. Primero se generará en formato 16:9 (desktop) y luego podrás crear la versión 9:16 (móvil).
+                    </p>
+                  </div>
+                </div>
+
+                {/* Input Area */}
+                <div className="p-4 border-t border-white/5 bg-black/30">
+                  <div className="relative">
+                    <textarea
+                      value={bannerInputText}
+                      onChange={(e) => setBannerInputText(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          handleBannerSend();
+                        }
+                      }}
+                      placeholder="Ej: Banner para venta de verano de zapatillas deportivas con tonos naranjas..."
+                      className="w-full bg-white/5 rounded-xl px-4 py-3 pr-14 text-sm placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-white/20 resize-none"
+                      rows={3}
+                    />
+                    <button
+                      onClick={handleBannerSend}
+                      disabled={!bannerInputText.trim() || bannerIsProcessing}
+                      className="absolute bottom-3 right-3 p-2 bg-white text-black rounded-lg disabled:opacity-30 disabled:cursor-not-allowed hover:bg-gray-200 transition-all"
+                    >
+                      {bannerIsProcessing ? (
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Send className="w-4 h-4" />
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* VIEW: FEEDBACK */}
           {currentView === 'feedback' && (

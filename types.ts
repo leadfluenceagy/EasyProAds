@@ -1,5 +1,5 @@
 
-export type AspectRatio = '1:1' | '9:16';
+export type AspectRatio = '1:1' | '9:16' | '16:9';
 
 export type ChatMode = 'generator' | 'iteration' | 'fashion';
 
@@ -7,7 +7,7 @@ export interface GeneratedImage {
   id: string;
   url: string;
   prompt: string;
-  originalIdea: string;
+  originalIdea?: string;
   aspectRatio: AspectRatio;
   timestamp: number;
 }
