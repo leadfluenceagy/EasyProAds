@@ -1,14 +1,12 @@
 import { GoogleGenAI, Part } from "@google/genai";
 
 export const config = {
-    runtime: 'edge',
-    regions: ['iad1'],
     maxDuration: 60, // 60 seconds for image generation
 };
 
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-export default async function handler(req: Request) {
+export default async function handler(req: Request): Promise<Response> {
     if (req.method !== 'POST') {
         return new Response(JSON.stringify({ error: 'Method not allowed' }), {
             status: 405,

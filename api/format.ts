@@ -25,8 +25,6 @@ Responde ÚNICAMENTE con el prompt optimizado en inglés. Sin explicaciones, sin
 `;
 
 export const config = {
-    runtime: 'edge',
-    regions: ['iad1'],
     maxDuration: 60,
 };
 

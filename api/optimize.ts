@@ -57,8 +57,7 @@ CRITICAL CONSTRAINTS:
 `;
 
 export const config = {
-    runtime: 'edge',
-    regions: ['iad1'], // Washington DC - closest to Google's API
+    maxDuration: 60,
 };
 
 export default async function handler(req: Request) {
