@@ -28,7 +28,10 @@ import {
   Paintbrush,
   Eraser,
   Minus,
-  ArrowRight
+  ArrowRight,
+  Undo2,
+  Redo2,
+  ChevronDown
 } from 'lucide-react';
 
 // Fix: Use explicit global declaration for aistudio to avoid type conflicts and resolve Blob error
@@ -137,15 +140,38 @@ const App: React.FC = () => {
   const [isEditorProcessing, setIsEditorProcessing] = useState(false);
   const [editorStatus, setEditorStatus] = useState('');
 
+  // Editor history for undo/redo (tracks RESULTS, not inputs)
+  const [editorResultHistory916, setEditorResultHistory916] = useState<string[]>([]);
+  const [editorResultHistory11, setEditorResultHistory11] = useState<string[]>([]);
+  const [editorResultIndex916, setEditorResultIndex916] = useState(-1);
+  const [editorResultIndex11, setEditorResultIndex11] = useState(-1);
+
+  // Edit modal state
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingImage, setEditingImage] = useState<string | null>(null);
+  const [editingFormat, setEditingFormat] = useState<'916' | '11'>('916');
+  const [editPrompt, setEditPrompt] = useState('');
+  const [editHistory, setEditHistory] = useState<string[]>([]);
+  const [editHistoryIndex, setEditHistoryIndex] = useState(-1);
+  const [isEditProcessing, setIsEditProcessing] = useState(false);
+  const [editStatus, setEditStatus] = useState('');
+  const [editMaskData, setEditMaskData] = useState<string | null>(null);
+  const [showEditBrushModal, setShowEditBrushModal] = useState(false);
+
   // Format section state
   const [formatInput916, setFormatInput916] = useState<string | null>(null);
   const [formatInput11, setFormatInput11] = useState<string | null>(null);
+  const [formatInput169, setFormatInput169] = useState<string | null>(null); // 16:9 input
   const [formatResult916, setFormatResult916] = useState<string | null>(null);
   const [formatResult11, setFormatResult11] = useState<string | null>(null);
+  const [formatResult916From169, setFormatResult916From169] = useState<string | null>(null); // 9:16 from 16:9
   const [isFormatProcessing, setIsFormatProcessing] = useState(false);
   const [formatStatus, setFormatStatus] = useState('');
+  const [selectedFormatType, setSelectedFormatType] = useState<'916to11' | '11to916' | '169to916'>('916to11');
+  const [isFormatDropdownOpen, setIsFormatDropdownOpen] = useState(false);
   const formatInput916Ref = useRef<HTMLInputElement>(null);
   const formatInput11Ref = useRef<HTMLInputElement>(null);
+  const formatInput169Ref = useRef<HTMLInputElement>(null);
 
   // Banner section state
   const [bannerInputText, setBannerInputText] = useState('');
@@ -192,13 +218,17 @@ const App: React.FC = () => {
     e.target.value = '';
   };
 
-  // Editor image handlers
+  // Editor image handlers (NO history tracking - only for initial input)
   const handleEditor916Change = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || !e.target.files[0]) return;
     const file = e.target.files[0];
     const reader = new FileReader();
     reader.onloadend = () => {
       setEditorImage916(reader.result as string);
+      // Clear result history when changing input
+      setEditorResultHistory916([]);
+      setEditorResultIndex916(-1);
+      setEditorResult916(null);
     };
     reader.readAsDataURL(file);
     e.target.value = '';
@@ -210,6 +240,10 @@ const App: React.FC = () => {
     const reader = new FileReader();
     reader.onloadend = () => {
       setEditorImage11(reader.result as string);
+      // Clear result history when changing input
+      setEditorResultHistory11([]);
+      setEditorResultIndex11(-1);
+      setEditorResult11(null);
     };
     reader.readAsDataURL(file);
     e.target.value = '';
@@ -237,6 +271,9 @@ const App: React.FC = () => {
         setEditorStatus('Generando imagen 9:16...');
         const result916 = await generateEditorImage(optimizedPrompt916, editorImage916, '9:16');
         setEditorResult916(result916);
+        // Add to RESULT history for undo/redo
+        setEditorResultHistory916(prev => [...prev.slice(0, editorResultIndex916 + 1), result916]);
+        setEditorResultIndex916(prev => prev + 1);
       }
 
       // Generate for 1:1 image if present
@@ -252,15 +289,209 @@ const App: React.FC = () => {
         setEditorStatus('Generando imagen 1:1...');
         const result11 = await generateEditorImage(optimizedPrompt11, editorImage11, '1:1');
         setEditorResult11(result11);
+        // Add to RESULT history for undo/redo
+        setEditorResultHistory11(prev => [...prev.slice(0, editorResultIndex11 + 1), result11]);
+        setEditorResultIndex11(prev => prev + 1);
       }
 
       setEditorStatus('¡Completado!');
+
+      // Clear input images after generating (they move to results)
+      setEditorImage916(null);
+      setEditorImage11(null);
+      setMask916Data(null);
+      setMask11Data(null);
     } catch (error: any) {
       console.error('❌ Editor generation failed:', error);
       setEditorStatus(`Error: ${error?.message || 'Unknown error'}`);
     } finally {
       setIsEditorProcessing(false);
     }
+  };
+
+  // Editor undo function - reverts to previous RESULT
+  const handleEditorUndo = () => {
+    // Undo 9:16 result
+    if (editorResultIndex916 > 0) {
+      const newIndex = editorResultIndex916 - 1;
+      setEditorResultIndex916(newIndex);
+      setEditorResult916(editorResultHistory916[newIndex]);
+    }
+    // Undo 1:1 result
+    if (editorResultIndex11 > 0) {
+      const newIndex = editorResultIndex11 - 1;
+      setEditorResultIndex11(newIndex);
+      setEditorResult11(editorResultHistory11[newIndex]);
+    }
+  };
+
+  // Editor redo function - restores next RESULT
+  const handleEditorRedo = () => {
+    // Redo 9:16 result
+    if (editorResultIndex916 < editorResultHistory916.length - 1) {
+      const newIndex = editorResultIndex916 + 1;
+      setEditorResultIndex916(newIndex);
+      setEditorResult916(editorResultHistory916[newIndex]);
+    }
+    // Redo 1:1 result
+    if (editorResultIndex11 < editorResultHistory11.length - 1) {
+      const newIndex = editorResultIndex11 + 1;
+      setEditorResultIndex11(newIndex);
+      setEditorResult11(editorResultHistory11[newIndex]);
+    }
+  };
+
+  // Use result as new input (for iterating on generated images)
+  const handleUseResultAsInput = (format: '916' | '11') => {
+    if (format === '916' && editorResult916) {
+      setEditorImage916(editorResult916);
+      // Clear result and its history
+      setEditorResult916(null);
+      setEditorResultHistory916([]);
+      setEditorResultIndex916(-1);
+      setMask916Data(null);
+    } else if (format === '11' && editorResult11) {
+      setEditorImage11(editorResult11);
+      // Clear result and its history
+      setEditorResult11(null);
+      setEditorResultHistory11([]);
+      setEditorResultIndex11(-1);
+      setMask11Data(null);
+    }
+  };
+
+  // New generation: save current results to gallery and clear ALL slots
+  const handleEditorNewGeneration = () => {
+    // Save current results to gallery
+    if (editorResult916) {
+      setHistory(prev => [{
+        id: Date.now().toString() + '-editor-916',
+        url: editorResult916,
+        prompt: editorPrompt,
+        timestamp: Date.now(),
+        aspectRatio: '9:16'
+      }, ...prev]);
+    }
+    if (editorResult11) {
+      setHistory(prev => [{
+        id: Date.now().toString() + '-editor-11',
+        url: editorResult11,
+        prompt: editorPrompt,
+        timestamp: Date.now(),
+        aspectRatio: '1:1'
+      }, ...prev]);
+    }
+
+    // Clear ALL slots (input AND result)
+    setEditorImage916(null);
+    setEditorImage11(null);
+    setEditorResult916(null);
+    setEditorResult11(null);
+    // Clear masks
+    setMask916Data(null);
+    setMask11Data(null);
+    // Clear prompt
+    setEditorPrompt('');
+    // Clear result history
+    setEditorResultHistory916([]);
+    setEditorResultHistory11([]);
+    setEditorResultIndex916(-1);
+    setEditorResultIndex11(-1);
+    setEditorStatus('');
+  };
+
+  // Open edit modal for a result image
+  const openEditModal = (image: string, format: '916' | '11') => {
+    setEditingImage(image);
+    setEditingFormat(format);
+    setEditHistory([image]);
+    setEditHistoryIndex(0);
+    setEditPrompt('');
+    setEditStatus('');
+    setShowEditModal(true);
+  };
+
+  // Generate edit in modal
+  const handleEditGenerate = async () => {
+    if (!editingImage || !editPrompt.trim()) return;
+
+    try {
+      setIsEditProcessing(true);
+      setEditStatus('Optimizando prompt...');
+
+      const optimizedPrompt = await optimizeEditorPrompt(editPrompt, editingImage, editMaskData);
+
+      setEditStatus('Generando...');
+      const result = await generateEditorImage(optimizedPrompt, editingImage, editingFormat === '916' ? '9:16' : '1:1');
+
+      // Add to history
+      setEditHistory(prev => [...prev.slice(0, editHistoryIndex + 1), result]);
+      setEditHistoryIndex(prev => prev + 1);
+      setEditingImage(result);
+
+      // Also update the main result
+      if (editingFormat === '916') {
+        setEditorResult916(result);
+        setEditorResultHistory916(prev => [...prev.slice(0, editorResultIndex916 + 1), result]);
+        setEditorResultIndex916(prev => prev + 1);
+      } else {
+        setEditorResult11(result);
+        setEditorResultHistory11(prev => [...prev.slice(0, editorResultIndex11 + 1), result]);
+        setEditorResultIndex11(prev => prev + 1);
+      }
+
+      setEditStatus('¡Completado!');
+    } catch (error: any) {
+      setEditStatus(`Error: ${error?.message || 'Unknown error'}`);
+    } finally {
+      setIsEditProcessing(false);
+    }
+  };
+
+  // Edit modal undo
+  const handleEditUndo = () => {
+    if (editHistoryIndex > 0) {
+      const newIndex = editHistoryIndex - 1;
+      setEditHistoryIndex(newIndex);
+      setEditingImage(editHistory[newIndex]);
+    }
+  };
+
+  // Edit modal redo
+  const handleEditRedo = () => {
+    if (editHistoryIndex < editHistory.length - 1) {
+      const newIndex = editHistoryIndex + 1;
+      setEditHistoryIndex(newIndex);
+      setEditingImage(editHistory[newIndex]);
+    }
+  };
+
+  // Close edit modal and save
+  const closeEditModal = () => {
+    // Update the main result with the current editing image
+    if (editingImage) {
+      if (editingFormat === '916') {
+        setEditorResult916(editingImage);
+      } else {
+        setEditorResult11(editingImage);
+      }
+    }
+    setShowEditModal(false);
+    setEditingImage(null);
+    setEditHistory([]);
+    setEditHistoryIndex(-1);
+    setEditMaskData(null);
+  };
+
+  // Download image from edit modal
+  const handleDownloadEditImage = () => {
+    if (!editingImage) return;
+    const link = document.createElement('a');
+    link.href = editingImage;
+    link.download = `edited_image_${editingFormat}_${Date.now()}.png`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   // Format section handlers
@@ -288,9 +519,32 @@ const App: React.FC = () => {
     e.target.value = '';
   };
 
+  const handleFormatInput169Change = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setFormatInput169(reader.result as string);
+      setFormatResult916From169(null); // Reset result
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  // Clear all formats function
+  const handleFormatClear = () => {
+    setFormatInput916(null);
+    setFormatInput11(null);
+    setFormatInput169(null);
+    setFormatResult916(null);
+    setFormatResult11(null);
+    setFormatResult916From169(null);
+    setFormatStatus('');
+  };
+
   const handleFormatGenerate = async () => {
     if (isFormatProcessing) return;
-    if (!formatInput916 && !formatInput11) return;
+    if (!formatInput916 && !formatInput11 && !formatInput169) return;
 
     setIsFormatProcessing(true);
     setFormatStatus('Analizando imagen...');
@@ -316,6 +570,17 @@ const App: React.FC = () => {
         setFormatStatus('Generando imagen 9:16...');
         const result = await generateFormatImage(optimizedPrompt, formatInput11, '9:16');
         setFormatResult916(result);
+      }
+
+      // Convert 16:9 to 9:16
+      if (formatInput169) {
+        setFormatStatus('Generando prompt para 16:9 → 9:16...');
+        const optimizedPrompt = await optimizeFormatPrompt(formatInput169, '16:9');
+        console.log('📐 Format prompt (16:9→9:16):', optimizedPrompt);
+
+        setFormatStatus('Generando imagen 9:16 desde 16:9...');
+        const result = await generateFormatImage(optimizedPrompt, formatInput169, '9:16');
+        setFormatResult916From169(result);
       }
 
       setFormatStatus('¡Completado!');
@@ -424,17 +689,35 @@ Responde ÚNICAMENTE con el prompt optimizado en inglés. Sin explicaciones adic
   const handleBannerGenerate916 = async () => {
     if (!bannerLastPrompt || bannerIsProcessing) return;
 
+    // Get the 16:9 image to use as reference
+    const img169 = bannerHistory.find(h => h.aspectRatio === '16:9');
+    if (!img169) return;
+
     setBannerIsProcessing(true);
 
     try {
-      // Adapt prompt for 9:16
-      const prompt916 = bannerLastPrompt
-        .replace('horizontal composition', 'vertical composition')
-        .replace('16:9', '9:16')
-        .replace(/left|right/gi, match => match === 'left' ? 'top' : 'bottom');
+      // Create prompt that references the 16:9 image for consistency
+      const prompt916 = `CRITICAL: Recreate this EXACT same image but adapted to 9:16 vertical format. 
+      
+PRESERVE EVERYTHING:
+- Same product/subject in the EXACT same position relative to the frame
+- Same colors, lighting, and visual style
+- Same mood and atmosphere
+- Same level of detail and quality
 
-      const finalImageUrl = await generateImage(prompt916, '9:16', bannerSelectedImages);
-      console.log('✅ Banner 9:16 generated');
+ADAPT FOR VERTICAL:
+- Expand the canvas vertically (add space above and below)
+- Keep the main subject centered
+- Maintain the negative space proportions for text overlay
+- Keep 40-60% of the frame as clean space for text
+
+Original concept: ${bannerLastPrompt}
+
+DO NOT change the subject, colors, or style. Only adapt the composition for vertical format.`;
+
+      // Use the 16:9 image as the primary reference
+      const finalImageUrl = await generateImage(prompt916, '9:16', [img169.url, ...bannerSelectedImages]);
+      console.log('✅ Banner 9:16 generated from 16:9 reference');
 
       setBannerHistory(prev => [{
         id: Date.now().toString() + '-916',
@@ -1377,6 +1660,7 @@ Responde ÚNICAMENTE con el prompt optimizado en inglés. Sin explicaciones adic
               {/* Hidden file inputs for Format */}
               <input type="file" ref={formatInput916Ref} onChange={handleFormatInput916Change} className="hidden" accept="image/*" />
               <input type="file" ref={formatInput11Ref} onChange={handleFormatInput11Change} className="hidden" accept="image/*" />
+              <input type="file" ref={formatInput169Ref} onChange={handleFormatInput169Change} className="hidden" accept="image/*" />
 
               {/* Brush Modal - Canvas Painting Editor */}
               {showBrushModal && (editorImage916 || editorImage11) && (
@@ -1562,7 +1846,21 @@ Responde ÚNICAMENTE con el prompt optimizado en inglés. Sin explicaciones adic
 
                 {/* LEFT SECTION: FORMATOS */}
                 <div className="flex flex-col border-r border-white/10 pr-8">
-                  <h2 className="text-lg font-black uppercase tracking-tight mb-4 text-center">Formatos</h2>
+                  {/* Header with clear button */}
+                  <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-lg font-black uppercase tracking-tight">Formatos</h2>
+                    <button
+                      onClick={handleFormatClear}
+                      disabled={!formatInput916 && !formatInput11 && !formatInput169 && !formatResult916 && !formatResult11 && !formatResult916From169}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${formatInput916 || formatInput11 || formatInput169 || formatResult916 || formatResult11 || formatResult916From169
+                        ? 'border-white/30 bg-white/5 hover:bg-white/10 text-white'
+                        : 'border-white/10 text-gray-600 cursor-not-allowed'
+                        }`}
+                      title="Limpiar todo"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
 
                   {/* 9:16 → 1:1 Row */}
                   <div className="flex items-center gap-3 mb-4">
@@ -1642,6 +1940,45 @@ Responde ÚNICAMENTE con el prompt optimizado en inglés. Sin explicaciones adic
                     </div>
                   </div>
 
+                  {/* 16:9 → 9:16 Row (NEW) */}
+                  <div className="flex items-center gap-3 mb-4">
+                    {/* Input 16:9 */}
+                    <div className="flex flex-col gap-1">
+                      <div
+                        className="w-[140px] h-[80px] border-2 border-dashed border-white/20 rounded-lg bg-white/5 hover:bg-white/10 transition-colors flex flex-col items-center justify-center cursor-pointer group overflow-hidden"
+                        onClick={() => formatInput169Ref.current?.click()}
+                      >
+                        {formatInput169 ? (
+                          <img src={formatInput169} alt="16:9" className="w-full h-full object-cover" />
+                        ) : (
+                          <>
+                            <Paperclip className="w-5 h-5 text-gray-600 group-hover:text-gray-400 transition-colors" />
+                            <p className="text-[8px] font-bold uppercase tracking-widest text-gray-600 mt-1">16:9</p>
+                          </>
+                        )}
+                      </div>
+                      <p className="text-[8px] font-bold uppercase tracking-widest text-gray-500 text-center">añade 16:9</p>
+                    </div>
+
+                    {/* Arrow */}
+                    <ArrowRight className="w-5 h-5 text-gray-600" />
+
+                    {/* Output 9:16 (from 16:9) */}
+                    <div
+                      className={`w-[100px] h-[178px] border rounded-lg overflow-hidden cursor-pointer ${formatResult916From169 ? 'border-white/20' : 'border-dashed border-white/10 bg-white/[0.02]'
+                        }`}
+                      onClick={() => formatResult916From169 && setPreviewImage(formatResult916From169)}
+                    >
+                      {formatResult916From169 ? (
+                        <img src={formatResult916From169} alt="Result 9:16" className="w-full h-full object-cover" />
+                      ) : isFormatProcessing && formatInput169 ? (
+                        <div className="w-full h-full flex items-center justify-center">
+                          <RefreshCw className="w-4 h-4 animate-spin text-gray-600" />
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+
                   {/* Status */}
                   {formatStatus && (
                     <p className={`text-[10px] font-medium mb-2 ${formatStatus.includes('Error') ? 'text-red-400' : 'text-gray-400'}`}>
@@ -1652,8 +1989,8 @@ Responde ÚNICAMENTE con el prompt optimizado en inglés. Sin explicaciones adic
                   {/* Generate Button */}
                   <button
                     onClick={handleFormatGenerate}
-                    disabled={isFormatProcessing || (!formatInput916 && !formatInput11)}
-                    className={`w-full py-2 rounded-lg font-bold text-[10px] uppercase tracking-wider transition-all flex items-center justify-center gap-2 ${isFormatProcessing || (!formatInput916 && !formatInput11)
+                    disabled={isFormatProcessing || (!formatInput916 && !formatInput11 && !formatInput169)}
+                    className={`w-full py-2 rounded-lg font-bold text-[10px] uppercase tracking-wider transition-all flex items-center justify-center gap-2 ${isFormatProcessing || (!formatInput916 && !formatInput11 && !formatInput169)
                       ? 'bg-gray-800 text-gray-600 cursor-not-allowed'
                       : 'bg-white text-black hover:bg-gray-200'
                       }`}
@@ -1671,7 +2008,23 @@ Responde ÚNICAMENTE con el prompt optimizado en inglés. Sin explicaciones adic
 
                 {/* RIGHT SECTION: EDITOR */}
                 <div className="flex-1 flex flex-col overflow-hidden">
-                  <h2 className="text-lg font-black uppercase tracking-tight mb-4 text-center">Editor</h2>
+                  {/* Editor Header with Toolbar */}
+                  <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-lg font-black uppercase tracking-tight">Editor</h2>
+
+                    {/* Toolbar: New Generation Button only */}
+                    <button
+                      onClick={handleEditorNewGeneration}
+                      disabled={!editorResult916 && !editorResult11}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${editorResult916 || editorResult11
+                        ? 'border-white/30 bg-white/5 hover:bg-white/10 text-white'
+                        : 'border-white/10 text-gray-600 cursor-not-allowed'
+                        }`}
+                      title="Nueva generación (guarda actual en galería)"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
 
                   {/* Editor Content */}
                   <div className="flex-1 flex gap-6 overflow-hidden">
@@ -1714,43 +2067,9 @@ Responde ÚNICAMENTE con el prompt optimizado en inglés. Sin explicaciones adic
                       </div>
                     </div>
 
-                    {/* Right Section: Prompt + Brush Button */}
-                    <div className="flex-1 flex flex-col gap-4 max-w-md">
-                      {/* Prompt Area */}
-                      <div className="border border-white/10 rounded-xl bg-[#0a0a0a]/50 p-4 flex-1 flex flex-col">
-                        <textarea
-                          value={editorPrompt}
-                          onChange={(e) => setEditorPrompt(e.target.value)}
-                          placeholder="añade el prompt para cambiar (ej: 'cambia el fondo a una playa')"
-                          className="flex-1 bg-transparent focus:outline-none text-sm font-medium placeholder:text-gray-600 resize-none"
-                        />
-                      </div>
-
-                      {/* Status */}
-                      {editorStatus && (
-                        <p className={`text-xs font-medium ${editorStatus.includes('Error') ? 'text-red-400' : 'text-gray-400'}`}>
-                          {editorStatus}
-                        </p>
-                      )}
-
-                      {/* Brush Button */}
-                      <div className="flex items-center gap-3">
-                        <button
-                          onClick={() => (editorImage916 || editorImage11) && setShowBrushModal(true)}
-                          className={`p-3 border border-white/20 rounded-xl transition-colors group ${(editorImage916 || editorImage11)
-                            ? 'bg-white/5 hover:bg-white/10 cursor-pointer'
-                            : 'bg-white/[0.02] cursor-not-allowed opacity-50'
-                            }`}
-                          title={editorImage916 || editorImage11 ? "Pintar zonas a editar" : "Sube imágenes primero"}
-                        >
-                          <Paintbrush className="w-5 h-5 text-gray-500 group-hover:text-white transition-colors" />
-                        </button>
-                        {(mask916Data || mask11Data) && (
-                          <span className="text-[10px] text-green-400 font-bold uppercase">Máscara guardada</span>
-                        )}
-                      </div>
-
-                      {/* Generate Button */}
+                    {/* Right Section: Prompt with integrated Brush */}
+                    <div className="flex-1 flex flex-col gap-3 max-w-md">
+                      {/* Generate Button - moved up */}
                       <button
                         onClick={handleEditorGenerate}
                         disabled={isEditorProcessing || (!editorImage916 && !editorImage11) || !editorPrompt.trim()}
@@ -1768,6 +2087,39 @@ Responde ÚNICAMENTE con el prompt optimizado en inglés. Sin explicaciones adic
                           'Generar'
                         )}
                       </button>
+
+                      {/* Status */}
+                      {editorStatus && (
+                        <p className={`text-xs font-medium ${editorStatus.includes('Error') ? 'text-red-400' : 'text-gray-400'}`}>
+                          {editorStatus}
+                        </p>
+                      )}
+
+                      {/* Prompt Area with integrated Brush */}
+                      <div className="border border-white/10 rounded-xl bg-[#0a0a0a]/50 p-4 flex-1 flex flex-col relative">
+                        <textarea
+                          value={editorPrompt}
+                          onChange={(e) => setEditorPrompt(e.target.value)}
+                          placeholder="añade el prompt para cambiar (ej: 'cambia el fondo a una playa')"
+                          className="flex-1 bg-transparent focus:outline-none text-sm font-medium placeholder:text-gray-600 resize-none pb-10"
+                        />
+                        {/* Brush button inside chat box - bottom right */}
+                        <div className="absolute bottom-3 right-3 flex items-center gap-2">
+                          {(mask916Data || mask11Data) && (
+                            <span className="text-[8px] text-green-400 font-bold uppercase">Máscara ✓</span>
+                          )}
+                          <button
+                            onClick={() => (editorImage916 || editorImage11) && setShowBrushModal(true)}
+                            className={`p-2 border border-white/20 rounded-lg transition-colors group ${(editorImage916 || editorImage11)
+                              ? 'bg-white/5 hover:bg-white/10 cursor-pointer'
+                              : 'bg-white/[0.02] cursor-not-allowed opacity-50'
+                              }`}
+                            title={editorImage916 || editorImage11 ? "Pintar zonas a editar" : "Sube imágenes primero"}
+                          >
+                            <Paintbrush className="w-4 h-4 text-gray-500 group-hover:text-white transition-colors" />
+                          </button>
+                        </div>
+                      </div>
                     </div>
                   </div>
 
@@ -1776,32 +2128,52 @@ Responde ÚNICAMENTE con el prompt optimizado en inglés. Sin explicaciones adic
                     <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500 mb-3">Resultado:</h3>
                     <div className="flex gap-4">
                       {/* Result 9:16 */}
-                      <div
-                        className={`w-[140px] h-[250px] border rounded-xl overflow-hidden cursor-pointer ${editorResult916 ? 'border-white/20' : 'border-dashed border-white/10 bg-white/[0.02]'
-                          }`}
-                        onClick={() => editorResult916 && setPreviewImage(editorResult916)}
-                      >
-                        {editorResult916 ? (
-                          <img src={editorResult916} alt="Result 9:16" className="w-full h-full object-cover" />
-                        ) : isEditorProcessing && editorImage916 ? (
-                          <div className="w-full h-full flex items-center justify-center">
-                            <RefreshCw className="w-6 h-6 animate-spin text-gray-600" />
-                          </div>
-                        ) : null}
+                      <div className="flex flex-col gap-2">
+                        <div
+                          className={`w-[140px] h-[250px] border rounded-xl overflow-hidden cursor-pointer relative group ${editorResult916 ? 'border-white/20' : 'border-dashed border-white/10 bg-white/[0.02]'
+                            }`}
+                          onClick={() => editorResult916 && setPreviewImage(editorResult916)}
+                        >
+                          {editorResult916 ? (
+                            <img src={editorResult916} alt="Result 9:16" className="w-full h-full object-cover" />
+                          ) : isEditorProcessing ? (
+                            <div className="w-full h-full flex items-center justify-center">
+                              <RefreshCw className="w-6 h-6 animate-spin text-gray-600" />
+                            </div>
+                          ) : null}
+                        </div>
+                        {editorResult916 && (
+                          <button
+                            onClick={() => openEditModal(editorResult916, '916')}
+                            className="text-[9px] font-bold uppercase tracking-wider text-white bg-white/10 hover:bg-white/20 transition-colors flex items-center justify-center gap-1 py-1.5 border border-white/20 rounded-lg"
+                          >
+                            ✏️ Editar
+                          </button>
+                        )}
                       </div>
                       {/* Result 1:1 */}
-                      <div
-                        className={`w-[120px] h-[120px] border rounded-xl overflow-hidden cursor-pointer ${editorResult11 ? 'border-white/20' : 'border-dashed border-white/10 bg-white/[0.02]'
-                          }`}
-                        onClick={() => editorResult11 && setPreviewImage(editorResult11)}
-                      >
-                        {editorResult11 ? (
-                          <img src={editorResult11} alt="Result 1:1" className="w-full h-full object-cover" />
-                        ) : isEditorProcessing && editorImage11 ? (
-                          <div className="w-full h-full flex items-center justify-center">
-                            <RefreshCw className="w-6 h-6 animate-spin text-gray-600" />
-                          </div>
-                        ) : null}
+                      <div className="flex flex-col gap-2">
+                        <div
+                          className={`w-[120px] h-[120px] border rounded-xl overflow-hidden cursor-pointer relative group ${editorResult11 ? 'border-white/20' : 'border-dashed border-white/10 bg-white/[0.02]'
+                            }`}
+                          onClick={() => editorResult11 && setPreviewImage(editorResult11)}
+                        >
+                          {editorResult11 ? (
+                            <img src={editorResult11} alt="Result 1:1" className="w-full h-full object-cover" />
+                          ) : isEditorProcessing ? (
+                            <div className="w-full h-full flex items-center justify-center">
+                              <RefreshCw className="w-6 h-6 animate-spin text-gray-600" />
+                            </div>
+                          ) : null}
+                        </div>
+                        {editorResult11 && (
+                          <button
+                            onClick={() => openEditModal(editorResult11, '11')}
+                            className="text-[9px] font-bold uppercase tracking-wider text-white bg-white/10 hover:bg-white/20 transition-colors flex items-center justify-center gap-1 py-1.5 border border-white/20 rounded-lg"
+                          >
+                            ✏️ Editar
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1812,6 +2184,279 @@ Responde ÚNICAMENTE con el prompt optimizado en inglés. Sin explicaciones adic
 
         </div>
       </main>
+
+      {/* Edit Modal */}
+      {showEditModal && editingImage && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
+          <div className="bg-[#0a0a0a] border border-white/10 rounded-2xl w-[90vw] max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-4 border-b border-white/10">
+              <div className="flex items-center gap-4">
+                <h3 className="text-lg font-black uppercase tracking-tight">Editar Imagen</h3>
+                {/* Undo/Redo Controls */}
+                <div className="flex items-center gap-1 border border-white/10 rounded-lg px-2 py-1">
+                  <button
+                    onClick={handleEditUndo}
+                    disabled={editHistoryIndex <= 0}
+                    className={`p-1 rounded transition-all ${editHistoryIndex > 0
+                      ? 'text-white hover:bg-white/10'
+                      : 'text-gray-600 cursor-not-allowed'
+                      }`}
+                    title="Ver versión anterior"
+                  >
+                    <Undo2 className="w-4 h-4" />
+                  </button>
+                  <span className="text-[9px] font-bold uppercase tracking-wider text-gray-500 px-1">antes</span>
+                  <span className="text-gray-600">-</span>
+                  <span className="text-[9px] font-bold uppercase tracking-wider text-gray-500 px-1">después</span>
+                  <button
+                    onClick={handleEditRedo}
+                    disabled={editHistoryIndex >= editHistory.length - 1}
+                    className={`p-1 rounded transition-all ${editHistoryIndex < editHistory.length - 1
+                      ? 'text-white hover:bg-white/10'
+                      : 'text-gray-600 cursor-not-allowed'
+                      }`}
+                    title="Ver siguiente versión"
+                  >
+                    <Redo2 className="w-4 h-4" />
+                  </button>
+                </div>
+                <span className="text-[10px] text-gray-500">
+                  Versión {editHistoryIndex + 1} de {editHistory.length}
+                </span>
+              </div>
+              <button
+                onClick={closeEditModal}
+                className="p-2 hover:bg-white/10 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="flex-1 flex gap-6 p-6 overflow-hidden">
+              {/* Left: Image + Download */}
+              <div className="flex-1 flex flex-col items-center justify-center gap-4">
+                <div className={`${editingFormat === '916' ? 'max-w-[300px]' : 'max-w-[400px]'} w-full`}>
+                  <img
+                    src={editingImage}
+                    alt="Editing"
+                    className="w-full h-auto rounded-xl border border-white/20"
+                  />
+                </div>
+                {/* Download Button */}
+                <button
+                  onClick={handleDownloadEditImage}
+                  className="flex items-center gap-2 px-4 py-2 border border-white/20 rounded-lg bg-white/5 hover:bg-white/10 transition-colors text-[10px] font-bold uppercase tracking-wider"
+                >
+                  <Download className="w-4 h-4" />
+                  Descargar
+                </button>
+              </div>
+
+              {/* Right: Chat */}
+              <div className="w-[320px] flex flex-col gap-4">
+                {/* Generate Button */}
+                <button
+                  onClick={handleEditGenerate}
+                  disabled={isEditProcessing || !editPrompt.trim()}
+                  className={`w-full py-3 rounded-xl font-bold text-[11px] uppercase tracking-wider transition-all flex items-center justify-center gap-2 ${isEditProcessing || !editPrompt.trim()
+                    ? 'bg-gray-800 text-gray-600 cursor-not-allowed'
+                    : 'bg-white text-black hover:bg-gray-200'
+                    }`}
+                >
+                  {isEditProcessing ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      Procesando...
+                    </>
+                  ) : (
+                    'Aplicar cambio'
+                  )}
+                </button>
+
+                {/* Status */}
+                {editStatus && (
+                  <p className={`text-xs font-medium ${editStatus.includes('Error') ? 'text-red-400' : 'text-gray-400'}`}>
+                    {editStatus}
+                  </p>
+                )}
+
+                {/* Chat/Prompt Area with integrated Brush */}
+                <div className="border border-white/10 rounded-xl bg-[#0a0a0a]/50 p-4 flex-1 flex flex-col relative">
+                  <textarea
+                    value={editPrompt}
+                    onChange={(e) => setEditPrompt(e.target.value)}
+                    placeholder="Describe qué cambio quieres aplicar (ej: 'cambia el fondo a una playa', 'hazlo más brillante')"
+                    className="flex-1 bg-transparent focus:outline-none text-sm font-medium placeholder:text-gray-600 resize-none pb-10"
+                  />
+                  {/* Brush button inside chat box - bottom right */}
+                  <div className="absolute bottom-3 right-3 flex items-center gap-2">
+                    {editMaskData && (
+                      <span className="text-[8px] text-green-400 font-bold uppercase">Máscara ✓</span>
+                    )}
+                    <button
+                      onClick={() => setShowEditBrushModal(true)}
+                      className="p-2 border border-white/20 rounded-lg transition-colors group bg-white/5 hover:bg-white/10 cursor-pointer"
+                      title="Pintar zonas a editar"
+                    >
+                      <Paintbrush className="w-4 h-4 text-gray-500 group-hover:text-white transition-colors" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Tips */}
+                <div className="text-[9px] text-gray-600 space-y-1">
+                  <p>💡 Cada cambio se guarda en el historial</p>
+                  <p>↩️ Usa "antes/después" para comparar versiones</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Brush Modal (for edit modal) */}
+      {showEditBrushModal && editingImage && (
+        <div
+          className="fixed inset-0 z-[60] bg-black/95 backdrop-blur-sm flex flex-col items-center justify-center p-4"
+          onClick={(e) => e.target === e.currentTarget && setShowEditBrushModal(false)}
+        >
+          {/* Toolbar */}
+          <div className="flex items-center gap-4 mb-4 p-3 bg-white/10 rounded-xl border border-white/20">
+            {/* Brush size control */}
+            <div className="flex items-center gap-2">
+              <Paintbrush className="w-4 h-4 text-gray-400" />
+              <button
+                onClick={() => setBrushSize(prev => Math.max(5, prev - 10))}
+                className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 transition-colors"
+              >
+                <Minus className="w-3 h-3" />
+              </button>
+              <span className="text-xs font-bold w-8 text-center">{brushSize}</span>
+              <button
+                onClick={() => setBrushSize(prev => Math.min(100, prev + 10))}
+                className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 transition-colors"
+              >
+                <Plus className="w-3 h-3" />
+              </button>
+            </div>
+
+            {/* Clear mask button */}
+            <button
+              onClick={() => {
+                const canvas = canvasRef.current;
+                if (canvas) {
+                  const ctx = canvas.getContext('2d');
+                  if (ctx) {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                  }
+                }
+              }}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 transition-colors text-xs font-bold uppercase"
+            >
+              <Eraser className="w-4 h-4" />
+              Limpiar
+            </button>
+
+            {/* Save and close */}
+            <button
+              onClick={() => {
+                const canvas = canvasRef.current;
+                if (canvas) {
+                  const maskData = canvas.toDataURL('image/png');
+                  setEditMaskData(maskData);
+                }
+                setShowEditBrushModal(false);
+              }}
+              className="px-4 py-1.5 rounded-lg bg-white text-black text-xs font-bold uppercase hover:bg-gray-200 transition-colors"
+            >
+              Guardar
+            </button>
+
+            {/* Close */}
+            <button
+              onClick={() => setShowEditBrushModal(false)}
+              className="p-2 rounded-lg bg-white/5 hover:bg-red-500/20 text-gray-400 hover:text-red-400 transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Canvas container */}
+          <div className="relative rounded-xl overflow-hidden shadow-2xl border border-white/10">
+            <img
+              ref={imageRef}
+              src={editingImage}
+              alt="Edit mask"
+              className="max-w-[80vw] max-h-[70vh] object-contain"
+              onLoad={(e) => {
+                const img = e.currentTarget;
+                const canvas = canvasRef.current;
+                if (canvas) {
+                  canvas.width = img.naturalWidth;
+                  canvas.height = img.naturalHeight;
+                  // Load existing mask if any
+                  if (editMaskData) {
+                    const ctx = canvas.getContext('2d');
+                    if (ctx) {
+                      const maskImg = new Image();
+                      maskImg.onload = () => {
+                        ctx.drawImage(maskImg, 0, 0);
+                      };
+                      maskImg.src = editMaskData;
+                    }
+                  }
+                }
+              }}
+            />
+            <canvas
+              ref={canvasRef}
+              className="absolute inset-0 w-full h-full cursor-crosshair"
+              style={{ opacity: 0.6 }}
+              onMouseDown={(e) => {
+                const canvas = canvasRef.current;
+                if (!canvas) return;
+                const ctx = canvas.getContext('2d');
+                if (!ctx) return;
+
+                const rect = canvas.getBoundingClientRect();
+                const scaleX = canvas.width / rect.width;
+                const scaleY = canvas.height / rect.height;
+                const x = (e.clientX - rect.left) * scaleX;
+                const y = (e.clientY - rect.top) * scaleY;
+
+                ctx.fillStyle = 'rgba(255, 0, 0, 0.5)';
+                ctx.beginPath();
+                ctx.arc(x, y, brushSize, 0, Math.PI * 2);
+                ctx.fill();
+
+                setIsDrawing(true);
+              }}
+              onMouseMove={(e) => {
+                if (!isDrawing) return;
+                const canvas = canvasRef.current;
+                if (!canvas) return;
+                const ctx = canvas.getContext('2d');
+                if (!ctx) return;
+
+                const rect = canvas.getBoundingClientRect();
+                const scaleX = canvas.width / rect.width;
+                const scaleY = canvas.height / rect.height;
+                const x = (e.clientX - rect.left) * scaleX;
+                const y = (e.clientY - rect.top) * scaleY;
+
+                ctx.fillStyle = 'rgba(255, 0, 0, 0.5)';
+                ctx.beginPath();
+                ctx.arc(x, y, brushSize, 0, Math.PI * 2);
+                ctx.fill();
+              }}
+              onMouseUp={() => setIsDrawing(false)}
+              onMouseLeave={() => setIsDrawing(false)}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 };

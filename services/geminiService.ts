@@ -492,11 +492,15 @@ export const generateEditorImage = async (
 
 export const optimizeFormatPrompt = async (
   imageBase64: string,
-  sourceFormat: '9:16' | '1:1'
+  sourceFormat: '9:16' | '1:1' | '16:9'
 ): Promise<string> => {
   console.log('📐 [optimizeFormatPrompt] Starting format prompt optimization...');
   console.log('📝 [optimizeFormatPrompt] Source format:', sourceFormat);
-  const targetFormat = sourceFormat === '9:16' ? '1:1' : '9:16';
+  // Determine target format based on source
+  let targetFormat: string;
+  if (sourceFormat === '9:16') targetFormat = '1:1';
+  else if (sourceFormat === '1:1') targetFormat = '9:16';
+  else targetFormat = '9:16'; // 16:9 -> 9:16
   console.log('🎯 [optimizeFormatPrompt] Target format:', targetFormat);
 
   const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_API_KEY });
