@@ -620,3 +620,195 @@ export const generateFormatImage = async (
 
   throw new Error('Format image generation failed. Please try again.');
 };
+
+// ============================================
+// REF COPY FUNCTIONS
+// ============================================
+
+const REF_COPY_PROMPT = `
+You are an elite Ad Creative Director specializing in recreating advertisement templates with new products.
+
+YOUR TASK:
+You receive TWO images:
+1. An AD TEMPLATE — a finished advertisement with a product, layout, colors, typography, and visual style.
+2. A PRODUCT IMAGE — the new product that must REPLACE the product shown in the ad template.
+
+You also receive USER INSTRUCTIONS that may include SPATIAL ANNOTATIONS (zones of the template with specific change requests).
+
+YOUR JOB:
+- Recreate the EXACT same ad layout, composition, lighting style, color scheme, and overall visual design from the template.
+- REPLACE the original product with the NEW product from the second image.
+- The new product must maintain its EXACT design: same colors, textures, logos, labels, and all visual details.
+- Adapt the product naturally into the template's scene (correct perspective, shadows, reflections, scale).
+- PRESERVE ALL TEXT AND COPY from the template EXACTLY AS-IS, maintaining same fonts, sizes, positions, and styling.
+- If the user requests specific text/copy changes via annotations, only modify the text in the zones they specify. All other text zones must remain IDENTICAL to the template.
+- If user annotations reference specific zones (e.g. "upper-left", "center"), interpret these as areas of the template image and apply changes only to those zones.
+
+SPATIAL ANNOTATIONS:
+The user may provide annotations in the format:
+"INSTRUCCIONES POR ZONA: 1. En la [position] ([x]%, [y]%): [instruction]"
+These refer to specific areas of the template image. [x]% is horizontal (0%=left, 100%=right), [y]% is vertical (0%=top, 100%=bottom).
+Apply each instruction ONLY to the referenced zone. Everything else stays identical to the template.
+
+STRICT RULES:
+1. PRESERVE the template's EXACT visual style, color palette, lighting direction, and overall mood.
+2. PRESERVE the new product's EXACT design — do NOT alter its colors, logos, or appearance.
+3. PRESERVE ALL TEXT from the template unless the user explicitly requests text changes for a specific zone.
+4. NATURAL INTEGRATION — the product must look like it belongs in the scene (correct perspective, lighting, shadows).
+5. PHOTOREALISTIC quality — 8K, sharp focus, professional commercial photography.
+6. NO artifacts, no AI tells, no distortions.
+7. The result must be INDISTINGUISHABLE from a professionally designed ad — same level of polish as the template.
+
+OUTPUT FORMAT:
+Generate a single optimized English prompt that instructs an image generation model to recreate the ad template with the new product. Be extremely detailed about:
+- The template's exact composition, layout, and background
+- The product's visual details and placement
+- All text zones and their content (preserving or modifying as instructed)
+- Color palette, lighting, and mood
+`;
+
+export const optimizeRefCopyPrompt = async (
+  userPrompt: string,
+  templateImage: string,
+  productImage: string
+): Promise<string> => {
+  console.log('🎨 [optimizeRefCopyPrompt] Starting ref copy prompt optimization...');
+
+  const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_API_KEY });
+
+  const templateMime = templateImage.match(/^data:(image\/[a-zA-Z+]+);base64,/)?.[1] || 'image/png';
+  const productMime = productImage.match(/^data:(image\/[a-zA-Z+]+);base64,/)?.[1] || 'image/png';
+
+  const parts: Part[] = [
+    {
+      inlineData: {
+        data: templateImage.split(',')[1] || templateImage,
+        mimeType: templateMime
+      }
+    },
+    {
+      inlineData: {
+        data: productImage.split(',')[1] || productImage,
+        mimeType: productMime
+      }
+    },
+    {
+      text: `IMAGE 1 (AD TEMPLATE): The first image is the advertisement template to recreate. You MUST preserve its EXACT layout, composition, text content, fonts, colors, and style.
+IMAGE 2 (NEW PRODUCT): The second image is the product that must replace the product shown in the template. Keep the new product's design EXACTLY as-is.
+
+USER INSTRUCTIONS: "${userPrompt}"
+
+IMPORTANT: Preserve EVERY text element from the template in the exact same position, font, and style. Only modify elements the user explicitly mentions. Generate the optimized prompt in English.`
+    }
+  ];
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: [{ role: 'user', parts }],
+      config: {
+        systemInstruction: REF_COPY_PROMPT,
+        temperature: 0.5,
+      },
+    });
+
+    const optimizedPrompt = response.text?.trim() || userPrompt;
+    console.log('✅ [optimizeRefCopyPrompt] Optimized prompt:', optimizedPrompt);
+    return optimizedPrompt;
+  } catch (err) {
+    console.error('❌ [optimizeRefCopyPrompt] Failed:', err);
+    return userPrompt;
+  }
+};
+
+export const generateRefCopyImage = async (
+  optimizedPrompt: string,
+  templateImage: string,
+  productImage: string,
+  aspectRatio: AspectRatio
+): Promise<string> => {
+  console.log('🚀 [generateRefCopyImage] Starting ref copy image generation...');
+
+  const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_API_KEY });
+
+  const templateMime = templateImage.match(/^data:(image\/[a-zA-Z+]+);base64,/)?.[1] || 'image/png';
+  const productMime = productImage.match(/^data:(image\/[a-zA-Z+]+);base64,/)?.[1] || 'image/png';
+
+  const parts: Part[] = [
+    {
+      inlineData: {
+        data: templateImage.split(',')[1] || templateImage,
+        mimeType: templateMime
+      }
+    },
+    {
+      inlineData: {
+        data: productImage.split(',')[1] || productImage,
+        mimeType: productMime
+      }
+    },
+    { text: optimizedPrompt },
+    { text: "CRITICAL INSTRUCTIONS: 1) Recreate the ad template layout EXACTLY — same composition, spacing, background, and visual style. 2) REPLACE the product with the new product, keeping the new product's EXACT design (colors, logos, textures) intact. 3) PRESERVE ALL TEXT from the template in the same positions, fonts, and styling — reproduce every text element faithfully. Only modify text if the user explicitly requested changes to specific zones. 4) The result must look like a professionally finished advertisement, indistinguishable from the original template's quality. 5) Photorealistic 8K quality, no artifacts, no distortions." }
+  ];
+
+  const modelsToTry = [
+    'gemini-3-pro-image-preview',
+    'gemini-2.5-flash-image'
+  ];
+
+  const maxRetriesPerModel = 2;
+  const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+  for (const modelName of modelsToTry) {
+    console.log(`🔄 [generateRefCopyImage] Trying model: ${modelName}`);
+
+    for (let attempt = 1; attempt <= maxRetriesPerModel; attempt++) {
+      try {
+        const response = await ai.models.generateContent({
+          model: modelName,
+          contents: { parts },
+          config: {
+            responseModalities: ['TEXT', 'IMAGE'],
+            imageConfig: {
+              aspectRatio: aspectRatio,
+              imageSize: '2K'
+            },
+          },
+        });
+
+        let imageUrl = '';
+        if (response.candidates?.[0]?.content) {
+          for (const part of response.candidates[0].content.parts) {
+            if (part.inlineData) {
+              imageUrl = `data:image/png;base64,${part.inlineData.data}`;
+              console.log('🎉 [generateRefCopyImage] Image generated successfully!');
+              break;
+            }
+          }
+        }
+
+        if (imageUrl) return imageUrl;
+        throw new Error('No image in response');
+
+      } catch (error: any) {
+        const errorMessage = error?.message || String(error);
+        const isOverloaded = errorMessage.includes('503') ||
+          errorMessage.includes('overloaded') ||
+          errorMessage.includes('UNAVAILABLE');
+
+        console.error(`💥 [generateRefCopyImage] Error (attempt ${attempt}):`, errorMessage);
+
+        if (isOverloaded && attempt < maxRetriesPerModel) {
+          await delay(attempt * 3000);
+          continue;
+        }
+
+        if (isOverloaded) break;
+        if (modelName !== modelsToTry[0]) throw error;
+        break;
+      }
+    }
+  }
+
+  throw new Error('Ref copy image generation failed. Please try again.');
+};

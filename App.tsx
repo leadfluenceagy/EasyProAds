@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ChatMessage, GeneratedImage, AspectRatio, ChatMode } from './types';
-import { professionalizePrompt, generateImage, optimizeEditorPrompt, generateEditorImage, optimizeFormatPrompt, generateFormatImage } from './services/geminiService';
+import { professionalizePrompt, generateImage, optimizeEditorPrompt, generateEditorImage, optimizeFormatPrompt, generateFormatImage, optimizeRefCopyPrompt, generateRefCopyImage } from './services/geminiService';
 import { supabase } from './services/supabase';
 import { Auth } from './components/Auth';
 import { Feedback } from './components/Feedback';
@@ -31,7 +31,8 @@ import {
   ArrowRight,
   Undo2,
   Redo2,
-  ChevronDown
+  ChevronDown,
+  Pencil
 } from 'lucide-react';
 
 // Fix: Use explicit global declaration for aistudio to avoid type conflicts and resolve Blob error
@@ -45,7 +46,7 @@ declare global {
   }
 }
 
-type View = 'workspace' | 'gallery' | 'settings' | 'feedback' | 'banners' | 'editor';
+type View = 'workspace' | 'gallery' | 'settings' | 'feedback' | 'banners' | 'refcopy' | 'editor';
 
 const App: React.FC = () => {
   const [session, setSession] = useState<Session | null>(null);
@@ -180,6 +181,31 @@ const App: React.FC = () => {
   const [bannerLastPrompt, setBannerLastPrompt] = useState('');
   const [bannerSelectedImages, setBannerSelectedImages] = useState<string[]>([]);
   const bannerFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Ref Copy section state
+  const [refCopyTemplates, setRefCopyTemplates] = useState<string[]>([]);
+  const [refCopySelectedTemplate, setRefCopySelectedTemplate] = useState<string | null>(null);
+  const [refCopyProductImage, setRefCopyProductImage] = useState<string | null>(null);
+  const [refCopyMessages, setRefCopyMessages] = useState<{ role: 'user' | 'assistant', content: string, image?: string }[]>([]);
+  const [refCopyInputText, setRefCopyInputText] = useState('');
+  const [refCopyResult, setRefCopyResult] = useState<string | null>(null);
+  const [isRefCopyProcessing, setIsRefCopyProcessing] = useState(false);
+  const [refCopyStatus, setRefCopyStatus] = useState('');
+  const [refCopyShowGallery, setRefCopyShowGallery] = useState(false);
+  const [refCopyAnnotations, setRefCopyAnnotations] = useState<{ x: number, y: number, comment: string }[]>([]);
+  const [refCopyActivePin, setRefCopyActivePin] = useState<number | null>(null);
+  const [refCopyPinInput, setRefCopyPinInput] = useState('');
+  const refCopyTemplateInputRef = useRef<HTMLInputElement>(null);
+  const refCopyProductInputRef = useRef<HTMLInputElement>(null);
+  const refCopyChatEndRef = useRef<HTMLDivElement>(null);
+
+  // Load templates from localStorage on mount
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('refcopy_templates');
+      if (saved) setRefCopyTemplates(JSON.parse(saved));
+    } catch (e) { console.warn('Failed to load templates:', e); }
+  }, []);
 
   const activeMessages = messagesByMode[activeMode];
 
@@ -939,6 +965,186 @@ DO NOT change the subject, colors, or style. Only adapt the composition for vert
     }
   };
 
+  // Restart handlers for each mode - clear all state and start fresh
+  const handleRestartGenerator = () => {
+    setInputText('');
+    setSelectedImages([]);
+    setMessagesByMode(prev => ({ ...prev, generator: [] }));
+    setPromptMapByMode(prev => ({ ...prev, generator: {} }));
+    setLastPrompt('');
+  };
+
+  const handleRestartIteration = () => {
+    setInputText('');
+    setSelectedImages([]);
+    setMessagesByMode(prev => ({ ...prev, iteration: [] }));
+    setPromptMapByMode(prev => ({ ...prev, iteration: {} }));
+    setLastPrompt('');
+  };
+
+  const handleRestartFashion = () => {
+    setInputText('');
+    setSelectedImages([]);
+    setMessagesByMode(prev => ({ ...prev, fashion: [] }));
+    setPromptMapByMode(prev => ({ ...prev, fashion: {} }));
+    setLastPrompt('');
+  };
+
+  // ============================================
+  // REF COPY HANDLERS
+  // ============================================
+
+  const handleRefCopyAddTemplate = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files) return;
+    const files = Array.from(e.target.files) as File[];
+    files.forEach(file => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const result = reader.result as string;
+        setRefCopyTemplates(prev => {
+          const updated = [...prev, result];
+          localStorage.setItem('refcopy_templates', JSON.stringify(updated));
+          return updated;
+        });
+      };
+      reader.readAsDataURL(file);
+    });
+    e.target.value = '';
+  };
+
+  const handleRefCopyDeleteTemplate = (index: number) => {
+    setRefCopyTemplates(prev => {
+      const updated = prev.filter((_, i) => i !== index);
+      localStorage.setItem('refcopy_templates', JSON.stringify(updated));
+      // If deleted template was selected, clear selection
+      if (refCopySelectedTemplate === prev[index]) {
+        setRefCopySelectedTemplate(null);
+      }
+      return updated;
+    });
+  };
+
+  const handleRefCopyProductChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || !e.target.files[0]) return;
+    const file = e.target.files[0];
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setRefCopyProductImage(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  // Helper: describe position in natural language
+  const describePosition = (x: number, y: number): string => {
+    const vPos = y < 0.33 ? 'parte superior' : y < 0.66 ? 'centro' : 'parte inferior';
+    const hPos = x < 0.33 ? 'izquierda' : x < 0.66 ? 'centro' : 'derecha';
+    if (vPos === 'centro' && hPos === 'centro') return 'centro de la imagen';
+    if (hPos === 'centro') return vPos;
+    return `${vPos}-${hPos}`;
+  };
+
+  const handleRefCopyAddPin = (e: React.MouseEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / rect.width;
+    const y = (e.clientY - rect.top) / rect.height;
+    const newIdx = refCopyAnnotations.length;
+    setRefCopyAnnotations(prev => [...prev, { x, y, comment: '' }]);
+    setRefCopyActivePin(newIdx);
+    setRefCopyPinInput('');
+  };
+
+  const handleRefCopySavePin = () => {
+    if (refCopyActivePin === null) return;
+    setRefCopyAnnotations(prev => prev.map((a, i) =>
+      i === refCopyActivePin ? { ...a, comment: refCopyPinInput.trim() } : a
+    ));
+    setRefCopyActivePin(null);
+    setRefCopyPinInput('');
+  };
+
+  const handleRefCopyDeletePin = (idx: number) => {
+    setRefCopyAnnotations(prev => prev.filter((_, i) => i !== idx));
+    if (refCopyActivePin === idx) {
+      setRefCopyActivePin(null);
+      setRefCopyPinInput('');
+    }
+  };
+
+  const handleRefCopySend = async () => {
+    const hasAnnotations = refCopyAnnotations.some(a => a.comment.trim());
+    const hasText = refCopyInputText.trim();
+    if ((!hasAnnotations && !hasText) || isRefCopyProcessing) return;
+    if (!refCopySelectedTemplate || !refCopyProductImage) return;
+
+    // Build prompt from annotations + optional text
+    let userText = '';
+    if (hasAnnotations) {
+      const annotationLines = refCopyAnnotations
+        .filter(a => a.comment.trim())
+        .map((a, i) => `${i + 1}. En la ${describePosition(a.x, a.y)} (${Math.round(a.x * 100)}%, ${Math.round(a.y * 100)}%): "${a.comment}"`);
+      userText = 'INSTRUCCIONES POR ZONA:\n' + annotationLines.join('\n');
+    }
+    if (hasText) {
+      userText += (userText ? '\n\nINSTRUCCIONES GENERALES: ' : '') + refCopyInputText.trim();
+    }
+
+    setRefCopyMessages(prev => [...prev, { role: 'user', content: userText }]);
+    setRefCopyInputText('');
+    setIsRefCopyProcessing(true);
+    setRefCopyStatus('Analizando plantilla y producto...');
+
+    try {
+      setRefCopyStatus('Optimizando prompt...');
+      const optimizedPrompt = await optimizeRefCopyPrompt(
+        userText,
+        refCopySelectedTemplate,
+        refCopyProductImage
+      );
+      console.log('📝 [RefCopy] Optimized prompt:', optimizedPrompt);
+
+      setRefCopyStatus('Generando imagen...');
+      const result = await generateRefCopyImage(
+        optimizedPrompt,
+        refCopySelectedTemplate,
+        refCopyProductImage,
+        '9:16'
+      );
+
+      setRefCopyResult(result);
+      setRefCopyMessages(prev => [...prev, { role: 'assistant', content: '¡Imagen generada!', image: result }]);
+      setRefCopyStatus('¡Completado!');
+
+      // Save to gallery
+      setHistory(prev => [{
+        id: Date.now().toString() + '-refcopy',
+        url: result,
+        prompt: userText,
+        timestamp: Date.now(),
+        aspectRatio: '9:16'
+      }, ...prev]);
+
+    } catch (error: any) {
+      console.error('❌ Ref copy generation failed:', error);
+      setRefCopyStatus(`Error: ${error?.message || 'Unknown error'}`);
+      setRefCopyMessages(prev => [...prev, { role: 'assistant', content: `Error: ${error?.message || 'Error desconocido'}` }]);
+    } finally {
+      setIsRefCopyProcessing(false);
+    }
+  };
+
+  const handleRefCopyRestart = () => {
+    setRefCopySelectedTemplate(null);
+    setRefCopyProductImage(null);
+    setRefCopyMessages([]);
+    setRefCopyInputText('');
+    setRefCopyResult(null);
+    setRefCopyStatus('');
+    setRefCopyAnnotations([]);
+    setRefCopyActivePin(null);
+    setRefCopyPinInput('');
+  };
+
   if (loading) {
     return (
       <div className="h-screen w-full flex flex-col items-center justify-center bg-[#020202] text-white">
@@ -1007,6 +1213,15 @@ DO NOT change the subject, colors, or style. Only adapt the composition for vert
             >
               <Zap className="w-6 h-6 shrink-0" />
               <span className="hidden lg:block">Banners</span>
+            </button>
+
+            <button
+              onClick={() => setCurrentView('refcopy')}
+              className={`flex items-center gap-3 px-4 py-4 rounded-2xl transition-all font-bold text-[11px] uppercase tracking-tight group ${currentView === 'refcopy' ? 'bg-white text-black shadow-lg' : 'hover:bg-white/5 text-gray-400'
+                }`}
+            >
+              <Repeat className="w-6 h-6 shrink-0" />
+              <span className="hidden lg:block">Ref Copy</span>
             </button>
 
             <button
@@ -1244,7 +1459,25 @@ DO NOT change the subject, colors, or style. Only adapt the composition for vert
 
                 {/* Prompt Input Section */}
                 <div className="space-y-3 shrink-0">
-                  <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500">Introduce el Prompt</h3>
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-500">Introduce el Prompt</h3>
+                    {/* Restart button for current mode */}
+                    <button
+                      onClick={() => {
+                        if (activeMode === 'generator') handleRestartGenerator();
+                        else if (activeMode === 'iteration') handleRestartIteration();
+                        else if (activeMode === 'fashion') handleRestartFashion();
+                      }}
+                      disabled={activeMessages.length === 0 && selectedImages.length === 0 && !inputText.trim()}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${activeMessages.length > 0 || selectedImages.length > 0 || inputText.trim()
+                        ? 'border-white/30 bg-white/5 hover:bg-white/10 text-white'
+                        : 'border-white/10 text-gray-600 cursor-not-allowed'
+                        }`}
+                      title="Reiniciar (limpia todo el contenido)"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                   <div className="relative border border-white/10 rounded-xl bg-[#0a0a0a]/50 h-[200px] flex flex-col">
                     <textarea
                       value={inputText}
@@ -1649,6 +1882,387 @@ DO NOT change the subject, colors, or style. Only adapt the composition for vert
           {/* VIEW: FEEDBACK */}
           {currentView === 'feedback' && (
             <Feedback />
+          )}
+
+          {/* VIEW: REF COPY */}
+          {currentView === 'refcopy' && (
+            <div className="h-full flex flex-col p-4 overflow-hidden">
+              {/* Hidden file inputs */}
+              <input type="file" ref={refCopyTemplateInputRef} onChange={handleRefCopyAddTemplate} className="hidden" accept="image/*" multiple />
+              <input type="file" ref={refCopyProductInputRef} onChange={handleRefCopyProductChange} className="hidden" accept="image/*" />
+
+              {/* FULLSCREEN TEMPLATE GALLERY MODAL */}
+              {refCopyShowGallery && (
+                <div className="fixed inset-0 z-[9999] bg-black/95 backdrop-blur-xl flex flex-col">
+                  {/* Modal Header */}
+                  <div className="flex items-center justify-between px-8 py-5 border-b border-white/10">
+                    <div className="flex items-center gap-4">
+                      <h2 className="text-sm font-black uppercase tracking-[0.2em] text-white">Plantillas de Ads</h2>
+                      <span className="text-[10px] text-gray-500 font-medium">{refCopyTemplates.length} plantillas</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() => refCopyTemplateInputRef.current?.click()}
+                        className="flex items-center gap-2 px-4 py-2 bg-white text-black rounded-xl text-[10px] font-bold uppercase tracking-wider hover:bg-gray-200 transition-all"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        Añadir
+                      </button>
+                      <button
+                        onClick={() => setRefCopyShowGallery(false)}
+                        className="p-2.5 bg-white/10 hover:bg-white/20 rounded-xl transition-all"
+                      >
+                        <X className="w-5 h-5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Modal Grid */}
+                  <div className="flex-1 overflow-y-auto p-8">
+                    <div className="grid grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 gap-4">
+                      {refCopyTemplates.map((tmpl, idx) => (
+                        <div
+                          key={idx}
+                          className={`relative aspect-[9/16] rounded-xl overflow-hidden border-2 cursor-pointer group transition-all hover:scale-[1.03] ${refCopySelectedTemplate === tmpl
+                            ? 'border-white shadow-lg shadow-white/20 ring-2 ring-white/30'
+                            : 'border-white/10 hover:border-white/40'
+                            }`}
+                          onClick={() => {
+                            setRefCopySelectedTemplate(tmpl);
+                            setRefCopyShowGallery(false);
+                          }}
+                        >
+                          <img src={tmpl} className="w-full h-full object-cover" alt={`Template ${idx + 1}`} />
+                          {refCopySelectedTemplate === tmpl && (
+                            <div className="absolute inset-0 bg-white/10 flex items-center justify-center">
+                              <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center">
+                                <ShieldCheck className="w-4 h-4 text-black" />
+                              </div>
+                            </div>
+                          )}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRefCopyDeleteTemplate(idx);
+                            }}
+                            className="absolute top-2 right-2 bg-red-500/90 p-1.5 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-400"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      ))}
+
+                      {/* Add Template Tile */}
+                      <div
+                        className="aspect-[9/16] rounded-xl border-2 border-dashed border-white/15 bg-white/5 hover:bg-white/10 transition-all flex flex-col items-center justify-center cursor-pointer group hover:border-white/30"
+                        onClick={() => refCopyTemplateInputRef.current?.click()}
+                      >
+                        <Plus className="w-8 h-8 text-gray-600 group-hover:text-gray-400 transition-colors" />
+                        <p className="text-[8px] font-bold uppercase tracking-widest text-gray-600 mt-2 group-hover:text-gray-400">Añadir</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* TOP BAR: Template selector strip + Product + Restart */}
+              <div className="flex items-center gap-3 mb-4">
+                {/* Template Selector - clickable strip */}
+                <div
+                  onClick={() => setRefCopyShowGallery(true)}
+                  className="flex items-center gap-3 px-4 py-2.5 bg-white/5 border border-white/10 rounded-xl cursor-pointer hover:bg-white/10 hover:border-white/20 transition-all group flex-1 min-w-0"
+                >
+                  {refCopySelectedTemplate ? (
+                    <div className="flex items-center gap-3 min-w-0">
+                      <img src={refCopySelectedTemplate} className="w-8 h-14 object-cover rounded-md border border-white/20 shrink-0" alt="Selected" />
+                      <div className="min-w-0">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-white truncate">Plantilla seleccionada</p>
+                        <p className="text-[9px] text-gray-500">Click para cambiar · {refCopyTemplates.length} disponibles</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-14 rounded-md border border-dashed border-white/20 bg-white/5 flex items-center justify-center shrink-0">
+                        <Repeat className="w-3.5 h-3.5 text-gray-600" />
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Selecciona plantilla</p>
+                        <p className="text-[9px] text-gray-500">Click para ver todas · {refCopyTemplates.length} disponibles</p>
+                      </div>
+                    </div>
+                  )}
+                  <ChevronDown className="w-4 h-4 text-gray-500 group-hover:text-gray-300 transition-colors shrink-0 ml-auto" />
+                </div>
+
+                {/* Product upload mini */}
+                <div
+                  onClick={() => refCopyProductInputRef.current?.click()}
+                  className="flex items-center gap-3 px-4 py-2.5 bg-white/5 border border-white/10 rounded-xl cursor-pointer hover:bg-white/10 hover:border-white/20 transition-all group shrink-0"
+                >
+                  {refCopyProductImage ? (
+                    <div className="flex items-center gap-3">
+                      <img src={refCopyProductImage} className="w-8 h-14 object-contain rounded-md border border-white/20" alt="Product" />
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-white">Producto</p>
+                        <p className="text-[9px] text-gray-500">Click para cambiar</p>
+                      </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setRefCopyProductImage(null);
+                        }}
+                        className="p-1 bg-red-500/80 rounded-full text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <X className="w-2.5 h-2.5" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-14 rounded-md border border-dashed border-white/20 bg-white/5 flex items-center justify-center">
+                        <Paperclip className="w-3.5 h-3.5 text-gray-600" />
+                      </div>
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Producto</p>
+                        <p className="text-[9px] text-gray-500">Subir imagen</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Restart */}
+                <button
+                  onClick={handleRefCopyRestart}
+                  disabled={!refCopySelectedTemplate && !refCopyProductImage && refCopyMessages.length === 0}
+                  className={`p-3 border rounded-xl transition-all shrink-0 ${refCopySelectedTemplate || refCopyProductImage || refCopyMessages.length > 0
+                    ? 'border-white/20 bg-white/5 hover:bg-white/10 text-white'
+                    : 'border-white/10 text-gray-700 cursor-not-allowed'
+                    }`}
+                  title="Reiniciar"
+                >
+                  <Plus className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* MAIN AREA: Template (with annotations) + Result */}
+              <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+
+                {/* Content area */}
+                <div className="flex-1 min-h-0 overflow-y-auto">
+                  {refCopySelectedTemplate ? (
+                    <div className="h-full flex gap-4 items-start justify-center p-2">
+
+                      {/* Template with annotations — main visual */}
+                      <div className="flex flex-col gap-2 max-w-[400px] shrink-0">
+                        <div className="flex items-center justify-between">
+                          <h3 className="text-[9px] font-black uppercase tracking-[0.2em] text-gray-600">Plantilla <span className="text-gray-700 font-medium normal-case tracking-normal">· click para anotar</span></h3>
+                          {refCopyAnnotations.length > 0 && (
+                            <button
+                              onClick={() => { setRefCopyAnnotations([]); setRefCopyActivePin(null); }}
+                              className="text-[8px] text-red-400/70 hover:text-red-400 font-bold uppercase tracking-wider transition-colors"
+                            >
+                              Borrar pins
+                            </button>
+                          )}
+                        </div>
+                        <div
+                          className="relative border border-white/10 rounded-xl overflow-hidden cursor-crosshair"
+                          onClick={handleRefCopyAddPin}
+                        >
+                          <img src={refCopySelectedTemplate} className="w-full h-auto select-none pointer-events-none" alt="Template" draggable={false} />
+
+                          {/* Render pins */}
+                          {refCopyAnnotations.map((pin, idx) => (
+                            <div
+                              key={idx}
+                              className="absolute"
+                              style={{ left: `${pin.x * 100}%`, top: `${pin.y * 100}%`, transform: 'translate(-50%, -50%)' }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (refCopyActivePin === idx) {
+                                  setRefCopyActivePin(null);
+                                } else {
+                                  setRefCopyActivePin(idx);
+                                  setRefCopyPinInput(pin.comment);
+                                }
+                              }}
+                            >
+                              {/* Pin circle */}
+                              <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-black shadow-lg cursor-pointer transition-all hover:scale-110 ${pin.comment ? 'bg-white text-black' : 'bg-yellow-400 text-black animate-pulse'
+                                }`}>
+                                {idx + 1}
+                              </div>
+
+                              {/* Comment popup */}
+                              {refCopyActivePin === idx && (
+                                <div
+                                  className="absolute z-50 mt-2 w-[240px] bg-[#1a1a1a] border border-white/20 rounded-xl shadow-2xl p-3"
+                                  style={{ left: pin.x > 0.6 ? 'auto' : '0', right: pin.x > 0.6 ? '0' : 'auto' }}
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <div className="flex items-center justify-between mb-2">
+                                    <span className="text-[8px] font-bold uppercase tracking-widest text-gray-500">Pin {idx + 1} · {describePosition(pin.x, pin.y)}</span>
+                                    <button
+                                      onClick={() => handleRefCopyDeletePin(idx)}
+                                      className="p-0.5 hover:bg-red-500/20 rounded transition-colors"
+                                    >
+                                      <X className="w-3 h-3 text-red-400" />
+                                    </button>
+                                  </div>
+                                  <input
+                                    type="text"
+                                    value={refCopyPinInput}
+                                    onChange={(e) => setRefCopyPinInput(e.target.value)}
+                                    onKeyDown={(e) => { if (e.key === 'Enter') handleRefCopySavePin(); }}
+                                    placeholder="Ej: Cambiar producto, nuevo color..."
+                                    className="w-full bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-[11px] placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-white/20"
+                                    autoFocus
+                                  />
+                                  <button
+                                    onClick={handleRefCopySavePin}
+                                    disabled={!refCopyPinInput.trim()}
+                                    className="mt-2 w-full py-1.5 bg-white text-black rounded-lg text-[10px] font-bold uppercase tracking-wider disabled:opacity-30 hover:bg-gray-200 transition-all"
+                                  >
+                                    Guardar
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Result — appears next to template after generation */}
+                      {refCopyResult ? (
+                        <div className="flex flex-col gap-2 max-w-[400px] shrink-0">
+                          <h3 className="text-[9px] font-black uppercase tracking-[0.2em] text-gray-600">Resultado</h3>
+                          <div className="border border-white/20 rounded-xl overflow-hidden cursor-pointer group relative">
+                            <img src={refCopyResult} className="w-full h-auto" alt="Result" onClick={() => setPreviewImage(refCopyResult)} />
+                            <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  downloadImage(refCopyResult!, Date.now().toString());
+                                }}
+                                className="p-3 bg-white text-black rounded-xl hover:bg-gray-200 transition-all"
+                                title="Descargar"
+                              >
+                                <Download className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditorImage916(refCopyResult!);
+                                  setEditorResult916(null);
+                                  setEditorResultHistory916([]);
+                                  setEditorResultIndex916(-1);
+                                  setCurrentView('editor');
+                                }}
+                                className="p-3 bg-white text-black rounded-xl hover:bg-gray-200 transition-all"
+                                title="Editar en Editor"
+                              >
+                                <Pencil className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ) : isRefCopyProcessing ? (
+                        <div className="flex flex-col items-center justify-center gap-3 min-w-[200px] py-20">
+                          <RefreshCw className="w-8 h-8 text-gray-500 animate-spin" />
+                          <p className="text-xs text-gray-500">{refCopyStatus}</p>
+                        </div>
+                      ) : null}
+
+                    </div>
+                  ) : (
+                    <div className="h-full flex flex-col items-center justify-center">
+                      <div className="text-center space-y-3">
+                        <Repeat className="w-10 h-10 mx-auto text-gray-800" />
+                        <p className="text-[10px] text-gray-600 leading-relaxed max-w-xs">
+                          Selecciona una plantilla y sube tu producto.<br />
+                          Haz click en la imagen para anotar los cambios.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Bottom bar: Annotations summary + Input */}
+                <div className="shrink-0 px-2 pb-2 pt-2">
+                  {/* Annotations chips */}
+                  {refCopyAnnotations.filter(a => a.comment.trim()).length > 0 && (
+                    <div className="mb-2">
+                      <div className="flex flex-wrap gap-1.5">
+                        {refCopyAnnotations.filter(a => a.comment.trim()).map((a, idx) => (
+                          <div key={idx} className="flex items-center gap-1.5 bg-white/5 border border-white/10 rounded-lg px-2 py-1">
+                            <span className="w-4 h-4 rounded-full bg-white text-black flex items-center justify-center text-[8px] font-black shrink-0">
+                              {refCopyAnnotations.indexOf(a) + 1}
+                            </span>
+                            <span className="text-[10px] text-gray-400 truncate max-w-[180px]">{a.comment}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Previous messages (compact) */}
+                  {refCopyMessages.length > 0 && (
+                    <div className="max-h-[60px] overflow-y-auto mb-2 space-y-1 px-1">
+                      {refCopyMessages.map((msg, idx) => (
+                        <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                          <div className={`max-w-[60%] rounded-xl px-3 py-1 ${msg.role === 'user'
+                            ? 'bg-white/10 text-white'
+                            : 'bg-white/5 border border-white/10 text-gray-400'
+                            }`}>
+                            <p className="text-[10px]">{msg.content}</p>
+                          </div>
+                        </div>
+                      ))}
+                      <div ref={refCopyChatEndRef} />
+                    </div>
+                  )}
+
+                  {/* Validation hint */}
+                  {(!refCopySelectedTemplate || !refCopyProductImage) && (
+                    <p className="text-[9px] text-yellow-500/60 font-medium mb-1.5 px-1">
+                      {!refCopySelectedTemplate && !refCopyProductImage
+                        ? '⚠ Selecciona una plantilla y añade un producto'
+                        : !refCopySelectedTemplate
+                          ? '⚠ Selecciona una plantilla de ad'
+                          : '⚠ Añade la imagen del producto'}
+                    </p>
+                  )}
+
+                  {/* Input */}
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={refCopyInputText}
+                      onChange={(e) => setRefCopyInputText(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          handleRefCopySend();
+                        }
+                      }}
+                      placeholder={refCopyAnnotations.some(a => a.comment.trim()) ? 'Instrucciones adicionales (opcional)...' : 'Describe los cambios o añade pins en la plantilla...'}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 pr-12 text-sm placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-white/20"
+                      disabled={!refCopySelectedTemplate || !refCopyProductImage}
+                    />
+                    <button
+                      onClick={handleRefCopySend}
+                      disabled={(!refCopyInputText.trim() && !refCopyAnnotations.some(a => a.comment.trim())) || isRefCopyProcessing || !refCopySelectedTemplate || !refCopyProductImage}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-white text-black rounded-lg disabled:opacity-30 disabled:cursor-not-allowed hover:bg-gray-200 transition-all"
+                    >
+                      {isRefCopyProcessing ? (
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Send className="w-3.5 h-3.5" />
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
           )}
 
           {/* VIEW: EDITOR */}
