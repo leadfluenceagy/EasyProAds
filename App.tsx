@@ -3,8 +3,10 @@ import { ChatMessage, GeneratedImage, AspectRatio, ChatMode } from './types';
 import { professionalizePrompt, generateImage, optimizeEditorPrompt, generateEditorImage, optimizeFormatPrompt, generateFormatImage, optimizeRefCopyPrompt, generateRefCopyImage } from './services/geminiService';
 import { fetchTemplates, uploadTemplate, deleteTemplate, RefCopyTemplate } from './services/templateService';
 import { supabase } from './services/supabase';
+import { trackImageGeneration, isAdminUser } from './services/adminService';
 import { Auth } from './components/Auth';
 import { Feedback } from './components/Feedback';
+import AdminView from './components/AdminView';
 import { Session } from '@supabase/supabase-js';
 import {
   Send,
@@ -47,11 +49,12 @@ declare global {
   }
 }
 
-type View = 'workspace' | 'gallery' | 'settings' | 'feedback' | 'banners' | 'refcopy' | 'editor';
+type View = 'workspace' | 'gallery' | 'settings' | 'feedback' | 'banners' | 'refcopy' | 'editor' | 'admin';
 
 const App: React.FC = () => {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
     // Escuchar cambios de autenticación
@@ -90,6 +93,15 @@ const App: React.FC = () => {
 
     return () => subscription.unsubscribe();
   }, []);
+
+  // Check admin status when session changes
+  useEffect(() => {
+    if (session?.user?.id) {
+      isAdminUser(session.user.id).then(setIsAdmin);
+    } else {
+      setIsAdmin(false);
+    }
+  }, [session?.user?.id]);
 
   // Navigation State
   const [currentView, setCurrentView] = useState<View>('workspace');
@@ -298,6 +310,7 @@ const App: React.FC = () => {
         setEditorStatus('Generando imagen 9:16...');
         const result916 = await generateEditorImage(optimizedPrompt916, editorImage916, '9:16');
         setEditorResult916(result916);
+        if (session?.user?.id) trackImageGeneration(session.user.id, 'editor');
         // Add to RESULT history for undo/redo
         setEditorResultHistory916(prev => [...prev.slice(0, editorResultIndex916 + 1), result916]);
         setEditorResultIndex916(prev => prev + 1);
@@ -316,6 +329,7 @@ const App: React.FC = () => {
         setEditorStatus('Generando imagen 1:1...');
         const result11 = await generateEditorImage(optimizedPrompt11, editorImage11, '1:1');
         setEditorResult11(result11);
+        if (session?.user?.id) trackImageGeneration(session.user.id, 'editor');
         // Add to RESULT history for undo/redo
         setEditorResultHistory11(prev => [...prev.slice(0, editorResultIndex11 + 1), result11]);
         setEditorResultIndex11(prev => prev + 1);
@@ -586,6 +600,7 @@ const App: React.FC = () => {
         setFormatStatus('Generando imagen 1:1...');
         const result = await generateFormatImage(optimizedPrompt, formatInput916, '1:1');
         setFormatResult11(result);
+        if (session?.user?.id) trackImageGeneration(session.user.id, 'formats');
       }
 
       // Convert 1:1 to 9:16
@@ -597,6 +612,7 @@ const App: React.FC = () => {
         setFormatStatus('Generando imagen 9:16...');
         const result = await generateFormatImage(optimizedPrompt, formatInput11, '9:16');
         setFormatResult916(result);
+        if (session?.user?.id) trackImageGeneration(session.user.id, 'formats');
       }
 
       // Convert 16:9 to 9:16
@@ -608,6 +624,7 @@ const App: React.FC = () => {
         setFormatStatus('Generando imagen 9:16 desde 16:9...');
         const result = await generateFormatImage(optimizedPrompt, formatInput169, '9:16');
         setFormatResult916From169(result);
+        if (session?.user?.id) trackImageGeneration(session.user.id, 'formats');
       }
 
       setFormatStatus('¡Completado!');
@@ -697,6 +714,7 @@ Responde ÚNICAMENTE con el prompt optimizado en inglés. Sin explicaciones adic
       // Generate 16:9 image
       const finalImageUrl = await generateImage(optimizedPrompt, '16:9', bannerSelectedImages);
       console.log('✅ Banner 16:9 generated');
+      if (session?.user?.id) trackImageGeneration(session.user.id, 'banners');
 
       setBannerHistory(prev => [...prev, {
         id: Date.now().toString(),
@@ -745,6 +763,7 @@ DO NOT change the subject, colors, or style. Only adapt the composition for vert
       // Use the 16:9 image as the primary reference
       const finalImageUrl = await generateImage(prompt916, '9:16', [img169.url, ...bannerSelectedImages]);
       console.log('✅ Banner 9:16 generated from 16:9 reference');
+      if (session?.user?.id) trackImageGeneration(session.user.id, 'banners');
 
       setBannerHistory(prev => [{
         id: Date.now().toString() + '-916',
@@ -892,6 +911,7 @@ DO NOT change the subject, colors, or style. Only adapt the composition for vert
       console.log('Starting image generation...');
       const finalImageUrl = await generateImage(optimizedPrompt, '9:16', currentImgs);
       console.log('Image generated successfully');
+      if (session?.user?.id) trackImageGeneration(session.user.id, currentMode === 'fashion' ? 'fashion' : 'generator');
 
       setHistory(prev => [...prev, {
         id: Date.now().toString(),
@@ -1109,6 +1129,7 @@ DO NOT change the subject, colors, or style. Only adapt the composition for vert
       setRefCopyResult(result);
       setRefCopyMessages(prev => [...prev, { role: 'assistant', content: '¡Imagen generada!', image: result }]);
       setRefCopyStatus('¡Completado!');
+      if (session?.user?.id) trackImageGeneration(session.user.id, 'refcopy');
 
       // Save to gallery
       setHistory(prev => [{
@@ -1263,6 +1284,18 @@ DO NOT change the subject, colors, or style. Only adapt the composition for vert
               <Settings className="w-6 h-6 shrink-0" />
               <span className="hidden lg:block">Settings</span>
             </button>
+
+            {/* Admin button - only visible for admins */}
+            {isAdmin && (
+              <button
+                onClick={() => setCurrentView('admin')}
+                className={`flex items-center gap-3 px-4 py-4 rounded-2xl transition-all font-bold text-[11px] uppercase tracking-tight group ${currentView === 'admin' ? 'bg-white text-black shadow-lg' : 'hover:bg-white/5 text-gray-400'
+                  }`}
+              >
+                <ShieldCheck className="w-6 h-6 shrink-0" />
+                <span className="hidden lg:block">Admin</span>
+              </button>
+            )}
 
             <button
               onClick={() => supabase.auth.signOut()}
@@ -1877,6 +1910,11 @@ DO NOT change the subject, colors, or style. Only adapt the composition for vert
           {/* VIEW: FEEDBACK */}
           {currentView === 'feedback' && (
             <Feedback />
+          )}
+
+          {/* VIEW: ADMIN */}
+          {currentView === 'admin' && isAdmin && (
+            <AdminView onUnauthorized={() => setCurrentView('workspace')} />
           )}
 
           {/* VIEW: REF COPY */}
