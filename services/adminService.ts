@@ -14,6 +14,7 @@ export interface UserStat {
 }
 
 export type GenerationSection = 'generator' | 'editor' | 'formats' | 'refcopy' | 'banners' | 'fashion';
+export type TimeRange = 'day' | 'week' | 'month' | 'all';
 
 /**
  * Track a single image generation event for the current user.
@@ -44,13 +45,33 @@ export async function isAdminUser(userId: string): Promise<boolean> {
 }
 
 /**
- * Fetch usage stats for all users. Only works for admins (enforced by RLS).
+ * Compute the ISO start date for a given time range.
  */
-export async function fetchAdminStats(): Promise<UserStat[]> {
-    // Get all usage rows
-    const { data: usageRows, error: usageError } = await supabase
+export function getRangeStart(range: TimeRange): string | null {
+    if (range === 'all') return null;
+    const now = new Date();
+    if (range === 'day') now.setDate(now.getDate() - 1);
+    else if (range === 'week') now.setDate(now.getDate() - 7);
+    else if (range === 'month') now.setMonth(now.getMonth() - 1);
+    return now.toISOString();
+}
+
+/**
+ * Fetch usage stats for all users. Only works for admins (enforced by RLS).
+ * @param range - time range filter ('day' | 'week' | 'month' | 'all')
+ */
+export async function fetchAdminStats(range: TimeRange = 'all'): Promise<UserStat[]> {
+    const since = getRangeStart(range);
+
+    // Build usage query with optional date filter
+    let query = supabase
         .from('image_usage')
         .select('user_id, section, created_at');
+    if (since) {
+        query = query.gte('created_at', since);
+    }
+
+    const { data: usageRows, error: usageError } = await query;
 
     if (usageError) {
         console.error('❌ [adminService] fetchAdminStats usage error:', usageError);
