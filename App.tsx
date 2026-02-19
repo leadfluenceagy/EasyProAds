@@ -2723,7 +2723,17 @@ DO NOT change the subject, colors, or style. Only adapt the composition for vert
                             <span className="text-[8px] text-green-400 font-bold uppercase">Máscara ✓</span>
                           )}
                           <button
-                            onClick={() => (editorImage916 || editorImage11) && setShowBrushModal(true)}
+                            onClick={() => {
+                              if (editorImage916 || editorImage11) {
+                                // Set activeEditImage to a format that actually has an image
+                                if (!editorImage916 && editorImage11) {
+                                  setActiveEditImage('11');
+                                } else if (editorImage916 && !editorImage11) {
+                                  setActiveEditImage('916');
+                                }
+                                setShowBrushModal(true);
+                              }
+                            }}
                             className={`p-2 border border-white/20 rounded-lg transition-colors group ${(editorImage916 || editorImage11)
                               ? 'bg-white/5 hover:bg-white/10 cursor-pointer'
                               : 'bg-white/[0.02] cursor-not-allowed opacity-50'
