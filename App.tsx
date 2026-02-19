@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ChatMessage, GeneratedImage, AspectRatio, ChatMode } from './types';
 import { professionalizePrompt, generateImage, optimizeEditorPrompt, generateEditorImage, optimizeFormatPrompt, generateFormatImage, optimizeRefCopyPrompt, generateRefCopyImage } from './services/geminiService';
+import { fetchTemplates, uploadTemplate, deleteTemplate, RefCopyTemplate } from './services/templateService';
 import { supabase } from './services/supabase';
 import { Auth } from './components/Auth';
 import { Feedback } from './components/Feedback';
@@ -183,7 +184,7 @@ const App: React.FC = () => {
   const bannerFileInputRef = useRef<HTMLInputElement>(null);
 
   // Ref Copy section state
-  const [refCopyTemplates, setRefCopyTemplates] = useState<string[]>([]);
+  const [refCopyTemplates, setRefCopyTemplates] = useState<RefCopyTemplate[]>([]);
   const [refCopySelectedTemplate, setRefCopySelectedTemplate] = useState<string | null>(null);
   const [refCopyProductImage, setRefCopyProductImage] = useState<string | null>(null);
   const [refCopyMessages, setRefCopyMessages] = useState<{ role: 'user' | 'assistant', content: string, image?: string }[]>([]);
@@ -199,13 +200,13 @@ const App: React.FC = () => {
   const refCopyProductInputRef = useRef<HTMLInputElement>(null);
   const refCopyChatEndRef = useRef<HTMLDivElement>(null);
 
-  // Load templates from localStorage on mount
+  // Load templates from Supabase on mount / session change
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem('refcopy_templates');
-      if (saved) setRefCopyTemplates(JSON.parse(saved));
-    } catch (e) { console.warn('Failed to load templates:', e); }
-  }, []);
+    if (!session?.user?.id) return;
+    fetchTemplates(session.user.id).then(templates => {
+      setRefCopyTemplates(templates);
+    });
+  }, [session?.user?.id]);
 
   const activeMessages = messagesByMode[activeMode];
 
@@ -994,34 +995,28 @@ DO NOT change the subject, colors, or style. Only adapt the composition for vert
   // REF COPY HANDLERS
   // ============================================
 
-  const handleRefCopyAddTemplate = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files) return;
+  const handleRefCopyAddTemplate = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || !session?.user?.id) return;
     const files = Array.from(e.target.files) as File[];
-    files.forEach(file => {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const result = reader.result as string;
-        setRefCopyTemplates(prev => {
-          const updated = [...prev, result];
-          localStorage.setItem('refcopy_templates', JSON.stringify(updated));
-          return updated;
-        });
-      };
-      reader.readAsDataURL(file);
-    });
+    for (const file of files) {
+      const template = await uploadTemplate(session.user.id, file);
+      if (template) {
+        setRefCopyTemplates(prev => [...prev, template]);
+      }
+    }
     e.target.value = '';
   };
 
-  const handleRefCopyDeleteTemplate = (index: number) => {
-    setRefCopyTemplates(prev => {
-      const updated = prev.filter((_, i) => i !== index);
-      localStorage.setItem('refcopy_templates', JSON.stringify(updated));
-      // If deleted template was selected, clear selection
-      if (refCopySelectedTemplate === prev[index]) {
-        setRefCopySelectedTemplate(null);
-      }
-      return updated;
-    });
+  const handleRefCopyDeleteTemplate = async (index: number) => {
+    const template = refCopyTemplates[index];
+    if (!template) return;
+    // Remove from state immediately for snappy UX
+    setRefCopyTemplates(prev => prev.filter((_, i) => i !== index));
+    if (refCopySelectedTemplate === template.url) {
+      setRefCopySelectedTemplate(null);
+    }
+    // Delete from Supabase in background
+    await deleteTemplate(template.id, template.storagePath);
   };
 
   const handleRefCopyProductChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1922,18 +1917,18 @@ DO NOT change the subject, colors, or style. Only adapt the composition for vert
                     <div className="grid grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 gap-4">
                       {refCopyTemplates.map((tmpl, idx) => (
                         <div
-                          key={idx}
-                          className={`relative aspect-[9/16] rounded-xl overflow-hidden border-2 cursor-pointer group transition-all hover:scale-[1.03] ${refCopySelectedTemplate === tmpl
+                          key={tmpl.id}
+                          className={`relative aspect-[9/16] rounded-xl overflow-hidden border-2 cursor-pointer group transition-all hover:scale-[1.03] ${refCopySelectedTemplate === tmpl.url
                             ? 'border-white shadow-lg shadow-white/20 ring-2 ring-white/30'
                             : 'border-white/10 hover:border-white/40'
                             }`}
                           onClick={() => {
-                            setRefCopySelectedTemplate(tmpl);
+                            setRefCopySelectedTemplate(tmpl.url);
                             setRefCopyShowGallery(false);
                           }}
                         >
-                          <img src={tmpl} className="w-full h-full object-cover" alt={`Template ${idx + 1}`} />
-                          {refCopySelectedTemplate === tmpl && (
+                          <img src={tmpl.url} className="w-full h-full object-cover" alt={`Template ${idx + 1}`} />
+                          {refCopySelectedTemplate === tmpl.url && (
                             <div className="absolute inset-0 bg-white/10 flex items-center justify-center">
                               <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center">
                                 <ShieldCheck className="w-4 h-4 text-black" />
