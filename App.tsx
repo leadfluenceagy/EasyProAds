@@ -35,7 +35,8 @@ import {
   Undo2,
   Redo2,
   ChevronDown,
-  Pencil
+  Pencil,
+  Check
 } from 'lucide-react';
 
 // Fix: Use explicit global declaration for aistudio to avoid type conflicts and resolve Blob error
@@ -1969,7 +1970,7 @@ DO NOT change the subject, colors, or style. Only adapt the composition for vert
                           {refCopySelectedTemplate === tmpl.url && (
                             <div className="absolute inset-0 bg-white/10 flex items-center justify-center">
                               <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center">
-                                <ShieldCheck className="w-4 h-4 text-black" />
+                                <Check className="w-4 h-4 text-black" />
                               </div>
                             </div>
                           )}
