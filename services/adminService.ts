@@ -14,7 +14,11 @@ export interface UserStat {
 }
 
 export type GenerationSection = 'generator' | 'editor' | 'formats' | 'refcopy' | 'banners' | 'fashion';
-export type TimeRange = 'day' | 'week' | 'month' | 'all';
+
+export interface DateRange {
+    from: string | null; // ISO string
+    to: string | null;   // ISO string
+}
 
 /**
  * Track a single image generation event for the current user.
@@ -45,76 +49,46 @@ export async function isAdminUser(userId: string): Promise<boolean> {
 }
 
 /**
- * Compute the ISO start date for a given time range.
+ * Fetch usage stats for all users, optionally filtered by date range.
  */
-export function getRangeStart(range: TimeRange): string | null {
-    if (range === 'all') return null;
-    const now = new Date();
-    if (range === 'day') now.setDate(now.getDate() - 1);
-    else if (range === 'week') now.setDate(now.getDate() - 7);
-    else if (range === 'month') now.setMonth(now.getMonth() - 1);
-    return now.toISOString();
-}
-
-/**
- * Fetch usage stats for all users. Only works for admins (enforced by RLS).
- * @param range - time range filter ('day' | 'week' | 'month' | 'all')
- */
-export async function fetchAdminStats(range: TimeRange = 'all'): Promise<UserStat[]> {
-    const since = getRangeStart(range);
-
-    // Build usage query with optional date filter
+export async function fetchAdminStats(range: DateRange = { from: null, to: null }): Promise<UserStat[]> {
     let query = supabase
         .from('image_usage')
         .select('user_id, section, created_at');
-    if (since) {
-        query = query.gte('created_at', since);
-    }
+
+    if (range.from) query = query.gte('created_at', range.from);
+    if (range.to) query = query.lte('created_at', range.to);
 
     const { data: usageRows, error: usageError } = await query;
-
     if (usageError) {
         console.error('❌ [adminService] fetchAdminStats usage error:', usageError);
         return [];
     }
 
-    // Get all profiles for email lookup
     const { data: profiles, error: profilesError } = await supabase
         .from('profiles')
         .select('id, email');
-
     if (profilesError) {
         console.error('❌ [adminService] fetchAdminStats profiles error:', profilesError);
         return [];
     }
 
     const emailMap: Record<string, string> = {};
-    for (const p of profiles || []) {
-        emailMap[p.id] = p.email || p.id;
-    }
+    for (const p of profiles || []) emailMap[p.id] = p.email || p.id;
 
-    // Aggregate by user
     const statsMap: Record<string, UserStat> = {};
     for (const row of usageRows || []) {
         if (!statsMap[row.user_id]) {
             statsMap[row.user_id] = {
                 userId: row.user_id,
                 email: emailMap[row.user_id] || row.user_id,
-                generator: 0,
-                editor: 0,
-                formats: 0,
-                refcopy: 0,
-                banners: 0,
-                fashion: 0,
-                total: 0,
-                lastActivity: null,
+                generator: 0, editor: 0, formats: 0, refcopy: 0, banners: 0, fashion: 0,
+                total: 0, lastActivity: null,
             };
         }
         const stat = statsMap[row.user_id];
         const section = row.section as GenerationSection;
-        if (section in stat) {
-            (stat as any)[section]++;
-        }
+        if (section in stat) (stat as any)[section]++;
         stat.total++;
         if (!stat.lastActivity || row.created_at > stat.lastActivity) {
             stat.lastActivity = row.created_at;
