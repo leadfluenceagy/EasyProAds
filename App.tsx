@@ -1112,9 +1112,14 @@ DO NOT change the subject, colors, or style. Only adapt the composition for vert
 
     try {
       setRefCopyStatus('Optimizando prompt...');
+
+      // Use pre-converted base64 data — never pass a raw Supabase URL to Gemini
+      const selectedTemplateObj = refCopyTemplates.find(t => t.url === refCopySelectedTemplate);
+      const templateForGemini = selectedTemplateObj?.base64 || refCopySelectedTemplate;
+
       const optimizedPrompt = await optimizeRefCopyPrompt(
         userText,
-        refCopySelectedTemplate,
+        templateForGemini,
         refCopyProductImage
       );
       console.log('📝 [RefCopy] Optimized prompt:', optimizedPrompt);
@@ -1122,7 +1127,7 @@ DO NOT change the subject, colors, or style. Only adapt the composition for vert
       setRefCopyStatus('Generando imagen...');
       const result = await generateRefCopyImage(
         optimizedPrompt,
-        refCopySelectedTemplate,
+        templateForGemini,
         refCopyProductImage,
         '9:16'
       );

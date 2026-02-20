@@ -214,6 +214,33 @@ Generate a prompt that:
 // Helper function to delay execution
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+/**
+ * Ensures an image is returned as a { data: base64string, mimeType } pair.
+ * If the input is already a data-URL ("data:image/...") it is split directly.
+ * If it is an http(s) URL (e.g. a Supabase signed URL) it is fetched and
+ * converted to Base64, because the Gemini API only accepts raw Base64 in
+ * inline_data.data — NOT URLs.
+ */
+const ensureBase64 = async (image: string): Promise<{ data: string; mimeType: string }> => {
+  if (image.startsWith('data:')) {
+    const mimeType = image.match(/^data:(image\/[a-zA-Z+]+);base64,/)?.[1] || 'image/jpeg';
+    return { data: image.split(',')[1], mimeType };
+  }
+  // It's a URL — fetch and convert
+  console.log('🔗 [ensureBase64] Fetching remote image to convert to Base64...');
+  const response = await fetch(image);
+  if (!response.ok) throw new Error(`Failed to fetch image: ${response.status} ${response.statusText}`);
+  const contentType = response.headers.get('content-type') || 'image/jpeg';
+  const mimeType = contentType.split(';')[0].trim();
+  const arrayBuffer = await response.arrayBuffer();
+  const uint8 = new Uint8Array(arrayBuffer);
+  let binary = '';
+  for (let i = 0; i < uint8.length; i++) binary += String.fromCharCode(uint8[i]);
+  const data = btoa(binary);
+  console.log(`✅ [ensureBase64] Converted remote image to Base64 (${data.length} chars, ${mimeType})`);
+  return { data, mimeType };
+};
+
 export const generateImage = async (prompt: string, aspectRatio: AspectRatio, referenceImages: string[] = []): Promise<string> => {
   console.log('🚀 [generateImage] Starting image generation...');
   console.log('📝 [generateImage] Prompt length:', prompt.length);
@@ -676,20 +703,21 @@ export const optimizeRefCopyPrompt = async (
 
   const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_API_KEY });
 
-  const templateMime = templateImage.match(/^data:(image\/[a-zA-Z+]+);base64,/)?.[1] || 'image/png';
-  const productMime = productImage.match(/^data:(image\/[a-zA-Z+]+);base64,/)?.[1] || 'image/png';
+  // Ensure both images are proper Base64 (not raw URLs)
+  const templateB64 = await ensureBase64(templateImage);
+  const productB64 = await ensureBase64(productImage);
 
   const parts: Part[] = [
     {
       inlineData: {
-        data: templateImage.split(',')[1] || templateImage,
-        mimeType: templateMime
+        data: templateB64.data,
+        mimeType: templateB64.mimeType
       }
     },
     {
       inlineData: {
-        data: productImage.split(',')[1] || productImage,
-        mimeType: productMime
+        data: productB64.data,
+        mimeType: productB64.mimeType
       }
     },
     {
@@ -731,20 +759,21 @@ export const generateRefCopyImage = async (
 
   const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_API_KEY });
 
-  const templateMime = templateImage.match(/^data:(image\/[a-zA-Z+]+);base64,/)?.[1] || 'image/png';
-  const productMime = productImage.match(/^data:(image\/[a-zA-Z+]+);base64,/)?.[1] || 'image/png';
+  // Ensure both images are proper Base64 (not raw URLs)
+  const templateB64 = await ensureBase64(templateImage);
+  const productB64 = await ensureBase64(productImage);
 
   const parts: Part[] = [
     {
       inlineData: {
-        data: templateImage.split(',')[1] || templateImage,
-        mimeType: templateMime
+        data: templateB64.data,
+        mimeType: templateB64.mimeType
       }
     },
     {
       inlineData: {
-        data: productImage.split(',')[1] || productImage,
-        mimeType: productMime
+        data: productB64.data,
+        mimeType: productB64.mimeType
       }
     },
     { text: optimizedPrompt },

@@ -4,10 +4,38 @@ export interface RefCopyTemplate {
     id: string;
     url: string;
     storagePath: string;
+    base64?: string; // base64 data URI — populated when available so Gemini never gets a raw URL
+}
+
+/**
+ * Downloads an image URL and returns it as a base64 data‑URI.
+ */
+async function urlToBase64(url: string): Promise<string> {
+    const res = await fetch(url);
+    const blob = await res.blob();
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+    });
+}
+
+/**
+ * Converts a File to a base64 data‑URI.
+ */
+function fileToBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
 }
 
 /**
  * Fetch all templates for the current user from Supabase.
+ * Each template's `base64` field is populated so callers never need to handle raw Supabase URLs.
  */
 export async function fetchTemplates(userId: string): Promise<RefCopyTemplate[]> {
     const { data, error } = await supabase
@@ -21,16 +49,32 @@ export async function fetchTemplates(userId: string): Promise<RefCopyTemplate[]>
         return [];
     }
 
-    return (data || []).map(row => ({
-        id: row.id,
-        url: row.image_url,
-        storagePath: row.storage_path,
-    }));
+    const rows = data || [];
+
+    // Convert all template URLs to base64 in parallel
+    const templates = await Promise.all(
+        rows.map(async (row) => {
+            let base64: string | undefined;
+            try {
+                base64 = await urlToBase64(row.image_url);
+            } catch (e) {
+                console.warn('⚠️ [templateService] Could not convert template to base64:', row.id, e);
+            }
+            return {
+                id: row.id,
+                url: row.image_url,
+                storagePath: row.storage_path,
+                base64,
+            };
+        })
+    );
+
+    return templates;
 }
 
 /**
  * Upload a template image to Supabase Storage and save the record in the DB.
- * Returns the new template object, or null on failure.
+ * Returns the new template object (with base64 pre-populated), or null on failure.
  */
 export async function uploadTemplate(
     userId: string,
@@ -56,14 +100,21 @@ export async function uploadTemplate(
 
     if (signError || !signedData?.signedUrl) {
         console.error('❌ [templateService] createSignedUrl error:', signError);
-        // Clean up orphaned file
         await supabase.storage.from('refcopy-templates').remove([storagePath]);
         return null;
     }
 
     const imageUrl = signedData.signedUrl;
 
-    // 3. Insert record in DB
+    // 3. Convert the local file directly to base64 (faster than re-downloading)
+    let base64: string | undefined;
+    try {
+        base64 = await fileToBase64(file);
+    } catch (e) {
+        console.warn('⚠️ [templateService] Could not convert uploaded file to base64:', e);
+    }
+
+    // 4. Insert record in DB
     const { data: insertData, error: insertError } = await supabase
         .from('refcopy_templates')
         .insert({ user_id: userId, image_url: imageUrl, storage_path: storagePath })
@@ -76,7 +127,7 @@ export async function uploadTemplate(
         return null;
     }
 
-    return { id: insertData.id, url: imageUrl, storagePath };
+    return { id: insertData.id, url: imageUrl, storagePath, base64 };
 }
 
 /**
@@ -86,7 +137,6 @@ export async function deleteTemplate(
     templateId: string,
     storagePath: string
 ): Promise<void> {
-    // Remove from DB first (RLS handles ownership check)
     const { error: dbError } = await supabase
         .from('refcopy_templates')
         .delete()
@@ -97,7 +147,6 @@ export async function deleteTemplate(
         return;
     }
 
-    // Remove from Storage
     const { error: storageError } = await supabase.storage
         .from('refcopy-templates')
         .remove([storagePath]);
