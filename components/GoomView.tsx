@@ -33,7 +33,7 @@ import {
     uploadReferenceCreative,
     deleteReferenceCreative,
 } from '../services/goomService';
-import { generateGoomCreativesBatch } from '../services/geminiService';
+import { generateGoomCreative } from '../services/geminiService';
 import { trackImageGeneration } from '../services/adminService';
 
 interface GoomViewProps {
@@ -48,7 +48,8 @@ interface GoomBar {
     adType: string;
     prompt: string;
     status: BarStatus;
-    result: string | null;
+    result916: string | null;
+    result11: string | null;
 }
 
 const createEmptyBars = (): GoomBar[] =>
@@ -58,7 +59,8 @@ const createEmptyBars = (): GoomBar[] =>
         adType: '',
         prompt: '',
         status: 'idle' as BarStatus,
-        result: null,
+        result916: null,
+        result11: null,
     }));
 
 const GoomView: React.FC<GoomViewProps> = ({ session }) => {
@@ -78,7 +80,6 @@ const GoomView: React.FC<GoomViewProps> = ({ session }) => {
     const [bars, setBars] = useState<GoomBar[]>(createEmptyBars);
     const [globalPrompt, setGlobalPrompt] = useState('');
     const [isGenerating, setIsGenerating] = useState(false);
-    const [globalAspectRatio, setGlobalAspectRatio] = useState<'9:16' | '1:1'>('9:16');
 
     // Refs
     const logoInputRef = useRef<HTMLInputElement>(null);
@@ -168,7 +169,6 @@ const GoomView: React.FC<GoomViewProps> = ({ session }) => {
     // --- GENERATION ---
 
     const handleGenerate = async () => {
-        // Find bars with a product selected
         const activeBars = bars
             .map((bar, index) => ({ bar, index }))
             .filter(({ bar }) => bar.product !== '');
@@ -179,59 +179,71 @@ const GoomView: React.FC<GoomViewProps> = ({ session }) => {
 
         // Reset statuses
         activeBars.forEach(({ index }) => {
-            updateBar(index, { status: 'processing', result: null });
+            updateBar(index, { status: 'processing', result916: null, result11: null });
         });
 
-        // Build items for batch generation
-        const items = activeBars.map(({ bar }) => {
-            // Get product images for this bar's product
+        // Build flat task list: each active bar produces 2 tasks (9:16 + 1:1)
+        const tasks = activeBars.flatMap(({ bar, index }) => {
             const prodImgs = productImages
                 .filter(p => p.productName === bar.product)
                 .map(p => p.base64 || p.imageUrl)
-                .filter(Boolean);
-
-            // Combine global prompt + individual prompt
+                .filter(Boolean) as string[];
             const combinedPrompt = [globalPrompt, bar.prompt].filter(Boolean).join('. ');
-
-            return {
-                prompt: combinedPrompt || `Create a stunning ad creative for ${bar.product}`,
-                productImages: prodImgs,
-                aspectRatio: globalAspectRatio as '9:16' | '1:1',
-            };
+            const prompt = combinedPrompt || `Create a stunning ad creative for ${bar.product}`;
+            return [
+                { barIndex: index, aspectRatio: '9:16' as const, prompt, productImages: prodImgs },
+                { barIndex: index, aspectRatio: '1:1' as const, prompt, productImages: prodImgs },
+            ];
         });
 
-        // Get reference creatives base64
         const refImages = referenceCreatives
             .map(r => r.base64 || r.imageUrl)
-            .filter(Boolean);
+            .filter(Boolean) as string[];
+
+        // Concurrency runner (max 3 parallel)
+        let nextIdx = 0;
+        const worker = async () => {
+            while (nextIdx < tasks.length) {
+                const idx = nextIdx++;
+                const task = tasks[idx];
+                try {
+                    const result = await generateGoomCreative(
+                        task.prompt,
+                        task.productImages,
+                        brandConfig?.logoBase64 || null,
+                        refImages,
+                        task.aspectRatio,
+                        styleGuide
+                    );
+                    setBars(prev => prev.map((bar, i) => {
+                        if (i !== task.barIndex) return bar;
+                        const updated = {
+                            ...bar,
+                            [task.aspectRatio === '9:16' ? 'result916' : 'result11']: result,
+                        };
+                        // Mark done only when both are complete
+                        const bothDone = updated.result916 !== null && updated.result11 !== null;
+                        const eitherError = updated.status === 'error';
+                        return { ...updated, status: bothDone ? 'done' : eitherError ? 'error' : 'processing' };
+                    }));
+                    trackImageGeneration(session.user.id, 'goom');
+                } catch (err) {
+                    console.error(`❌ Task ${idx} (bar ${task.barIndex} ${task.aspectRatio}) failed:`, err);
+                    setBars(prev => prev.map((bar, i) =>
+                        i === task.barIndex ? { ...bar, status: 'error' } : bar
+                    ));
+                }
+            }
+        };
 
         try {
-            await generateGoomCreativesBatch(
-                items,
-                brandConfig?.logoBase64 || null,
-                refImages,
-                styleGuide,
-                3, // concurrency
-                (batchIndex, status, result) => {
-                    const { index } = activeBars[batchIndex];
-                    if (status === 'start') {
-                        updateBar(index, { status: 'processing' });
-                    } else if (status === 'done' && result) {
-                        updateBar(index, { status: 'done', result });
-                        trackImageGeneration(session.user.id, 'goom');
-                    } else if (status === 'error') {
-                        updateBar(index, { status: 'error' });
-                    }
-                }
-            );
-        } catch (error) {
-            console.error('Batch generation failed:', error);
+            await Promise.all(Array.from({ length: 3 }, () => worker()));
         } finally {
             setIsGenerating(false);
         }
     };
 
-    const handleDownload = (imageUrl: string, index: number) => {
+    const handleDownload = (imageUrl: string, label: string, index: number) => {
         if (!imageUrl.startsWith('data:')) return;
         const [header, base64Data] = imageUrl.split(',');
         const mimeType = header.match(/data:(.*?);/)?.[1] || 'image/png';
@@ -244,7 +256,7 @@ const GoomView: React.FC<GoomViewProps> = ({ session }) => {
         const blobUrl = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = blobUrl;
-        link.download = `goom-creative-${index + 1}-${Date.now()}.png`;
+        link.download = `goom-${index + 1}-${label}-${Date.now()}.png`;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -256,7 +268,7 @@ const GoomView: React.FC<GoomViewProps> = ({ session }) => {
         setGlobalPrompt('');
     };
 
-    // Count active (with product selected) bars
+    // Count active bars and done bars (done = both 9:16 and 1:1 ready)
     const activeCount = bars.filter(b => b.product !== '').length;
     const doneCount = bars.filter(b => b.status === 'done').length;
 
@@ -457,18 +469,13 @@ const GoomView: React.FC<GoomViewProps> = ({ session }) => {
                         value={globalPrompt}
                         onChange={e => setGlobalPrompt(e.target.value)}
                         placeholder="Prompt global (se aplica a todas las barras)..."
-                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-[11px] text-white placeholder-gray-600 focus:outline-none focus:border-emerald-500/50 pr-24"
+                        className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-[11px] text-white placeholder-gray-600 focus:outline-none focus:border-emerald-500/50 pr-32"
                         disabled={isGenerating}
                     />
-                    <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
-                        {/* Aspect ratio toggle */}
-                        <button
-                            onClick={() => setGlobalAspectRatio(prev => prev === '9:16' ? '1:1' : '9:16')}
-                            className="px-2 py-1 bg-white/5 text-gray-500 rounded-lg text-[9px] font-bold hover:bg-white/10 transition-all"
-                            disabled={isGenerating}
-                        >
-                            {globalAspectRatio}
-                        </button>
+                    <div className="absolute right-2 top-1/2 -translate-y-1/2">
+                        <span className="px-2 py-1 bg-white/5 text-emerald-400 rounded-lg text-[9px] font-black">
+                            9:16 + 1:1
+                        </span>
                     </div>
                 </div>
 
@@ -489,7 +496,7 @@ const GoomView: React.FC<GoomViewProps> = ({ session }) => {
                     ) : (
                         <>
                             <Sparkles className="w-4 h-4" />
-                            Generar {activeCount > 0 ? `(${activeCount})` : ''}
+                            Generar {activeCount > 0 ? `(${activeCount * 2})` : ''}
                         </>
                     )}
                 </button>
@@ -564,45 +571,75 @@ const GoomView: React.FC<GoomViewProps> = ({ session }) => {
                             className="flex-1 min-w-0 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-[10px] text-white placeholder-gray-600 focus:outline-none focus:border-emerald-500/50"
                         />
 
-                        {/* Result preview */}
-                        <div className="w-[50px] h-[50px] rounded-lg overflow-hidden shrink-0 border border-white/10 bg-white/[0.02]">
-                            {bar.result ? (
-                                <img
-                                    src={bar.result}
-                                    className="w-full h-full object-cover cursor-pointer hover:opacity-80 transition-opacity"
-                                    alt={`Creative ${index + 1}`}
-                                    onClick={() => {
-                                        // Open in new tab for full preview
-                                        const win = window.open();
-                                        if (win) {
-                                            win.document.write(`<img src="${bar.result}" style="max-width:100%;max-height:100vh;margin:auto;display:block;background:#000;" />`);
-                                        }
-                                    }}
-                                />
-                            ) : bar.status === 'processing' ? (
-                                <div className="w-full h-full flex items-center justify-center">
-                                    <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
+                        {/* Results: two thumbnails */}
+                        <div className="flex gap-1 shrink-0">
+                            {/* 9:16 thumbnail */}
+                            <div className="flex flex-col items-center gap-0.5">
+                                <div className="w-[38px] h-[50px] rounded-lg overflow-hidden border border-white/10 bg-white/[0.02]">
+                                    {bar.result916 ? (
+                                        <img
+                                            src={bar.result916}
+                                            className="w-full h-full object-cover cursor-pointer hover:opacity-80 transition-opacity"
+                                            alt="9:16"
+                                            onClick={() => { const w = window.open(); w?.document.write(`<img src="${bar.result916}" style="max-width:100%;max-height:100vh;margin:auto;display:block;background:#000;"/>`); }}
+                                        />
+                                    ) : bar.status === 'processing' ? (
+                                        <div className="w-full h-full flex items-center justify-center">
+                                            <Loader2 className="w-3 h-3 animate-spin text-emerald-400" />
+                                        </div>
+                                    ) : (
+                                        <div className="w-full h-full flex items-center justify-center">
+                                            <ImageIcon className="w-2.5 h-2.5 text-gray-700" />
+                                        </div>
+                                    )}
                                 </div>
-                            ) : bar.status === 'error' ? (
-                                <div className="w-full h-full flex items-center justify-center">
-                                    <AlertCircle className="w-4 h-4 text-red-400" />
+                                <span className="text-[7px] text-gray-600 font-bold">9:16</span>
+                            </div>
+                            {/* 1:1 thumbnail */}
+                            <div className="flex flex-col items-center gap-0.5">
+                                <div className="w-[50px] h-[50px] rounded-lg overflow-hidden border border-white/10 bg-white/[0.02]">
+                                    {bar.result11 ? (
+                                        <img
+                                            src={bar.result11}
+                                            className="w-full h-full object-cover cursor-pointer hover:opacity-80 transition-opacity"
+                                            alt="1:1"
+                                            onClick={() => { const w = window.open(); w?.document.write(`<img src="${bar.result11}" style="max-width:100%;max-height:100vh;margin:auto;display:block;background:#000;"/>`); }}
+                                        />
+                                    ) : bar.status === 'processing' ? (
+                                        <div className="w-full h-full flex items-center justify-center">
+                                            <Loader2 className="w-3 h-3 animate-spin text-emerald-400" />
+                                        </div>
+                                    ) : (
+                                        <div className="w-full h-full flex items-center justify-center">
+                                            <ImageIcon className="w-2.5 h-2.5 text-gray-700" />
+                                        </div>
+                                    )}
                                 </div>
-                            ) : (
-                                <div className="w-full h-full flex items-center justify-center">
-                                    <ImageIcon className="w-3 h-3 text-gray-700" />
-                                </div>
-                            )}
+                                <span className="text-[7px] text-gray-600 font-bold">1:1</span>
+                            </div>
                         </div>
 
-                        {/* Download button */}
-                        {bar.result && (
-                            <button
-                                onClick={() => handleDownload(bar.result!, index)}
-                                className="p-2 bg-white/5 text-gray-400 rounded-lg hover:bg-white/10 hover:text-white transition-all shrink-0"
-                            >
-                                <Download className="w-3.5 h-3.5" />
-                            </button>
-                        )}
+                        {/* Download buttons */}
+                        <div className="flex flex-col gap-1 shrink-0">
+                            {bar.result916 && (
+                                <button
+                                    onClick={() => handleDownload(bar.result916!, '9-16', index)}
+                                    className="p-1.5 bg-white/5 text-gray-400 rounded-lg hover:bg-white/10 hover:text-white transition-all"
+                                    title="Descargar 9:16"
+                                >
+                                    <Download className="w-3 h-3" />
+                                </button>
+                            )}
+                            {bar.result11 && (
+                                <button
+                                    onClick={() => handleDownload(bar.result11!, '1-1', index)}
+                                    className="p-1.5 bg-white/5 text-gray-400 rounded-lg hover:bg-white/10 hover:text-white transition-all"
+                                    title="Descargar 1:1"
+                                >
+                                    <Download className="w-3 h-3" />
+                                </button>
+                            )}
+                        </div>
                     </div>
                 ))}
             </div>

@@ -71,7 +71,8 @@ export async function fetchBrandConfig(userId: string): Promise<GoomBrandConfig 
     const { data, error } = await supabase
         .from('goom_brand_config')
         .select('id, logo_url, logo_storage_path, style_guide')
-        .eq('user_id', userId)
+        .order('created_at', { ascending: true })
+        .limit(1)
         .single();
 
     if (error || !data) {
@@ -189,7 +190,6 @@ export async function fetchProductImages(userId: string, productName?: GoomProdu
     let query = supabase
         .from('goom_product_images')
         .select('id, product_name, image_url, storage_path')
-        .eq('user_id', userId)
         .order('created_at', { ascending: true });
 
     if (productName) {
@@ -296,7 +296,6 @@ export async function fetchReferenceCreatives(userId: string): Promise<GoomRefer
     const { data, error } = await supabase
         .from('goom_reference_creatives')
         .select('id, image_url, storage_path, category')
-        .eq('user_id', userId)
         .order('created_at', { ascending: true });
 
     if (error) {
