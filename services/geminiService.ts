@@ -2,50 +2,27 @@ import { GoogleGenAI, Part } from "@google/genai";
 import { AspectRatio, ChatMode } from "../types";
 
 const GENERATOR_PROMPT = `
-System Role: You are an elite commercial Prompt Engineer and Visual Director. Your job is to take a user's basic environment description and a reference product image, and rewrite them into a highly technical, ultra-photorealistic image generation prompt.
+You are an elite Visual Strategist for high-end commercial advertising.
 
-Data Handoff Protocol:
-You are an automated backend agent. OUTPUT ONLY THE FINAL, OPTIMIZED PROMPT. Do not include greetings, explanations, formatting markers (like "Prompt:"), or conversational filler.
+PRODUCT DESIGN PRESERVATION RULE:
+The product/object from the reference image MUST maintain its EXACT DESIGN:
+- EXACT same colors, textures, and materials
+- EXACT same logos, labels, patterns, and all visual details
+- EXACT same proportions and scale relative to itself
+- DO NOT modify, improve, recolor, or redesign the product
 
-════════════════════════════════
-ABSOLUTE PRODUCT IDENTITY LOCK (HIGHEST PRIORITY):
-Your generated prompt MUST emphasize that the reference product is the single source of truth and must remain 100% visually identical. Inject the following strict constraints into the prompt:
+WHAT YOU CAN CHANGE:
+- Product POSITION in the scene (angle, rotation, tilt, orientation)
+- Product PLACEMENT (where it sits in the composition)
+- Environment, background, lighting, shadows, reflections
 
-ZERO MODIFICATION: The product must appear as the exact same physical object moved into a new environment. Do not recreate, reinterpret, redesign, or approximate it.
+WHAT YOU CANNOT CHANGE:
+- Any aspect of the product's actual DESIGN or APPEARANCE
+- Colors, logos, textures, patterns, labels, or visual details of the product
 
-TEXT AND LOGOS: All text, logos, labels, and markings must remain exactly identical, character-for-character, in shape, size, color, and position.
+YOUR JOB: Place this product (with unchanged design) in an appropriate, stunning environment. You may reposition/rotate the product naturally in the scene.
 
-COLORS AND MATERIALS: Preserve exact colors, tones, gradients, and finishes. Material behavior (metal reflections, fabric weave, plastic grain, glass transparency) must remain physically accurate.
-
-GEOMETRY AND STRUCTURE: Preserve exact shape, proportions, dimensions, and thickness. Do not deform or alter geometry.
-
-SURFACE DETAILS: Preserve all micro-features (stitching, scratches, imperfections). No artificial smoothing or CGI-like cleaning.
-
-════════════════════════════════
-ENVIRONMENT & PHYSICAL INTEGRATION PROTOCOL:
-Take the user's environment concept and elevate it using professional photography terminology to ensure absolute realism:
-
-Physical Integration: Specify that the product must obey real-world physics (correct scale, perspective, depth, contact shadows, and lighting interaction). It must NEVER appear floating or composited.
-
-Camera & Lighting Realism: Specify realistic photography characteristics (e.g., 35mm, 50mm, or 85mm focal lengths), natural depth of field, physically accurate lighting, and natural shadow gradients. Avoid impossible or stylized rendering.
-
-Human Elements (If Applicable): If humans are in the user's scene, specify that skin must appear completely natural with visible pores, real skin microtexture, and realistic subsurface scattering. No airbrushed, plastic, or filtered skin.
-
-Natural Imperfections: Command the inclusion of subtle, natural microscopic variations in the environment's surface textures and lighting falloff to avoid a synthetic, perfectly uniform look.
-
-════════════════════════════════
-GLOBAL STRICT PROHIBITIONS TO INCLUDE:
-
-NO modification of product design, text, or logos.
-
-NO floating objects or warped geometry.
-
-NO artificial smoothing or CGI-like rendering.
-
-NO TEXT anywhere in the scene except what already exists on the reference product.
-
-Final Objective:
-Generate the upgraded text prompt now based on the user's input, maximizing photorealism and guaranteeing zero deviation from the product's original physical identity.
+STRICT VISUAL CONSTRAINTS: NO studio gear visible, luxury environments preferred, cinematic lighting, NO TEXT anywhere.
 `;
 
 const ITERATION_PROMPT = `
@@ -352,7 +329,7 @@ export const generateImage = async (prompt: string, aspectRatio: AspectRatio, re
         console.error(`💥 [generateImage] Error with ${modelName} (attempt ${attempt}):`, errorMessage);
 
         if (isOverloaded && attempt < maxRetriesPerModel) {
-          const waitTime = attempt * 3000; // 3s, 6s
+          const waitTime = attempt * 1000; // 1s, 2s
           console.log(`⏳ [generateImage] Model overloaded, waiting ${waitTime / 1000}s before retry...`);
           await delay(waitTime);
           continue;
@@ -386,12 +363,14 @@ export const generateImage = async (prompt: string, aspectRatio: AspectRatio, re
 export const optimizeEditorPrompt = async (
   userPrompt: string,
   imageBase64: string,
-  maskBase64: string | null
+  maskBase64: string | null,
+  referenceImage: string | null = null
 ): Promise<string> => {
   console.log('🎨 [optimizeEditorPrompt] Starting editor prompt optimization...');
   console.log('📝 [optimizeEditorPrompt] User prompt:', userPrompt);
   console.log('🖼️  [optimizeEditorPrompt] Has image:', !!imageBase64);
   console.log('🎭 [optimizeEditorPrompt] Has mask:', !!maskBase64);
+  console.log('📎 [optimizeEditorPrompt] Has reference image:', !!referenceImage);
 
   const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_API_KEY });
 
@@ -415,12 +394,45 @@ export const optimizeEditorPrompt = async (
         mimeType: maskMimeType
       }
     });
+  }
+
+  // Add reference image if present
+  if (referenceImage) {
+    const refMimeType = referenceImage.match(/^data:(image\/[a-zA-Z+]+);base64,/)?.[1] || 'image/png';
+    parts.push({
+      inlineData: {
+        data: referenceImage.split(',')[1] || referenceImage,
+        mimeType: refMimeType
+      }
+    });
+  }
+
+  // Build context text based on what's provided
+  if (maskBase64 && referenceImage) {
+    parts.push({
+      text: `IMAGEN ORIGINAL: Primera imagen adjunta.
+MÁSCARA: Segunda imagen adjunta (las zonas pintadas en rosa/rojo son las áreas a editar).
+IMAGEN DE REFERENCIA: Tercera imagen adjunta. Este es el objeto/elemento que el usuario quiere insertar en la zona marcada.
+SOLICITUD DEL USUARIO: "${userPrompt}"
+
+Analiza la máscara, usa la imagen de referencia como el objeto a insertar, y genera el prompt optimizado en inglés.`
+    });
+  } else if (maskBase64) {
     parts.push({
       text: `IMAGEN ORIGINAL: Primera imagen adjunta.
 MÁSCARA: Segunda imagen adjunta (las zonas pintadas en rosa/rojo son las áreas a editar).
 SOLICITUD DEL USUARIO: "${userPrompt}"
 
 Analiza la máscara y genera el prompt optimizado en inglés.`
+    });
+  } else if (referenceImage) {
+    parts.push({
+      text: `IMAGEN ORIGINAL: Primera imagen adjunta.
+NO HAY MÁSCARA.
+IMAGEN DE REFERENCIA: Segunda imagen adjunta. Este es el objeto/elemento que el usuario quiere insertar en la imagen.
+SOLICITUD DEL USUARIO: "${userPrompt}"
+
+Usa la imagen de referencia como el objeto a insertar y genera el prompt optimizado en inglés.`
     });
   } else {
     parts.push({
@@ -454,10 +466,12 @@ Genera el prompt optimizado en inglés.`
 export const generateEditorImage = async (
   optimizedPrompt: string,
   originalImage: string,
-  aspectRatio: AspectRatio
+  aspectRatio: AspectRatio,
+  referenceImage: string | null = null
 ): Promise<string> => {
   console.log('🚀 [generateEditorImage] Starting editor image generation...');
   console.log('📝 [generateEditorImage] Prompt:', optimizedPrompt.substring(0, 100) + '...');
+  console.log('📎 [generateEditorImage] Has reference image:', !!referenceImage);
 
   const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_API_KEY });
 
@@ -470,9 +484,23 @@ export const generateEditorImage = async (
         mimeType: imageMimeType
       }
     },
-    { text: optimizedPrompt },
-    { text: "CRITICAL: Apply the edit to this exact image. Preserve all unmentioned elements exactly. Photorealistic quality. No artifacts." }
   ];
+
+  // Add reference image if provided
+  if (referenceImage) {
+    const refMimeType = referenceImage.match(/^data:(image\/[a-zA-Z+]+);base64,/)?.[1] || 'image/png';
+    parts.push({
+      inlineData: {
+        data: referenceImage.split(',')[1] || referenceImage,
+        mimeType: refMimeType
+      }
+    });
+    parts.push({ text: optimizedPrompt });
+    parts.push({ text: "CRITICAL: Apply the edit to the FIRST image. Use the SECOND image as the reference object to insert/replace. Preserve all unmentioned elements exactly. Photorealistic quality. No artifacts. Integrate the reference object naturally with matching lighting, perspective, and shadows." });
+  } else {
+    parts.push({ text: optimizedPrompt });
+    parts.push({ text: "CRITICAL: Apply the edit to this exact image. Preserve all unmentioned elements exactly. Photorealistic quality. No artifacts." });
+  }
 
   const modelsToTry = [
     'gemini-3-pro-image-preview',
@@ -522,7 +550,7 @@ export const generateEditorImage = async (
         console.error(`💥 [generateEditorImage] Error (attempt ${attempt}):`, errorMessage);
 
         if (isOverloaded && attempt < maxRetriesPerModel) {
-          await delay(attempt * 3000);
+          await delay(attempt * 1000);
           continue;
         }
 
@@ -657,7 +685,7 @@ export const generateFormatImage = async (
         console.error(`💥 [generateFormatImage] Error (attempt ${attempt}):`, errorMessage);
 
         if (isOverloaded && attempt < maxRetriesPerModel) {
-          await delay(attempt * 3000);
+          await delay(attempt * 1000);
           continue;
         }
 
@@ -851,7 +879,7 @@ export const generateRefCopyImage = async (
         console.error(`💥 [generateRefCopyImage] Error (attempt ${attempt}):`, errorMessage);
 
         if (isOverloaded && attempt < maxRetriesPerModel) {
-          await delay(attempt * 3000);
+          await delay(attempt * 1000);
           continue;
         }
 
@@ -863,4 +891,235 @@ export const generateRefCopyImage = async (
   }
 
   throw new Error('Ref copy image generation failed. Please try again.');
+};
+
+// ============================================
+// GOOM CREATIVE GENERATION
+// ============================================
+
+const GOOM_SYSTEM_PROMPT = `
+You are an elite Creative Director specializing in supplement/health brand advertising for social media.
+
+YOUR BRAND: GOOM — A premium Argentine supplement brand.
+
+YOUR TASK:
+You receive:
+1. PRODUCT IMAGES — photos of the specific product to feature
+2. BRAND LOGO — must be subtly integrated into every creative
+3. REFERENCE CREATIVES — existing ads from the brand showing the established visual style
+4. USER INSTRUCTIONS — what kind of creative to generate
+
+YOUR JOB:
+Create a stunning, scroll-stopping advertisement creative that:
+
+PRODUCT RULES:
+- Feature the product from the PRODUCT IMAGES with its EXACT design preserved
+- Same colors, labels, textures, logos — DO NOT modify the product appearance
+- You MAY reposition/rotate the product naturally in the scene
+
+BRAND CONSISTENCY:
+- Study the REFERENCE CREATIVES carefully for: color palette, composition style, typography treatment, mood, lighting
+- Match the brand's established visual language
+- Integrate the LOGO naturally (corner placement, subtle watermark, or as part of the design)
+
+CREATIVE EXCELLENCE:
+- Professional commercial photography quality
+- Stunning, vibrant, premium feel
+- Clean composition with clear focal point
+- Appropriate for social media advertising
+- 8K resolution, photorealistic, sharp focus
+
+STRICT RULES:
+1. PRESERVE the product's exact design from reference photos
+2. MATCH the brand style from reference creatives
+3. INCLUDE the logo in every creative
+4. NO text overlays unless specifically requested
+5. NO artifacts, no AI tells
+6. Every creative should be unique but brand-consistent
+`;
+
+export const generateGoomCreative = async (
+  prompt: string,
+  productImages: string[],
+  logoBase64: string | null,
+  referenceCreatives: string[],
+  aspectRatio: AspectRatio,
+  styleGuide: string = ''
+): Promise<string> => {
+  console.log('🚀 [generateGoomCreative] Starting GOOM creative generation...');
+  console.log('📝 [generateGoomCreative] Prompt:', prompt.substring(0, 100));
+  console.log('🖼️  [generateGoomCreative] Product images:', productImages.length);
+  console.log('🎨 [generateGoomCreative] Reference creatives:', referenceCreatives.length);
+  console.log('📐 [generateGoomCreative] Aspect ratio:', aspectRatio);
+
+  const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_API_KEY });
+
+  const parts: Part[] = [];
+
+  // Add product images first
+  for (const img of productImages) {
+    const mimeType = img.match(/^data:(image\/[a-zA-Z+]+);base64,/)?.[1] || 'image/png';
+    parts.push({
+      inlineData: {
+        data: img.split(',')[1] || img,
+        mimeType
+      }
+    });
+  }
+
+  // Add logo
+  if (logoBase64) {
+    const mimeType = logoBase64.match(/^data:(image\/[a-zA-Z+]+);base64,/)?.[1] || 'image/png';
+    parts.push({
+      inlineData: {
+        data: logoBase64.split(',')[1] || logoBase64,
+        mimeType
+      }
+    });
+  }
+
+  // Add reference creatives (max 3 to avoid overloading context)
+  const refsToSend = referenceCreatives.slice(0, 3);
+  for (const ref of refsToSend) {
+    const mimeType = ref.match(/^data:(image\/[a-zA-Z+]+);base64,/)?.[1] || 'image/png';
+    parts.push({
+      inlineData: {
+        data: ref.split(',')[1] || ref,
+        mimeType
+      }
+    });
+  }
+
+  // Build the text prompt
+  let textPrompt = '';
+  if (productImages.length > 0) {
+    textPrompt += `PRODUCT IMAGES: The first ${productImages.length} image(s) show the product to feature. Preserve its EXACT design.\n\n`;
+  }
+  if (logoBase64) {
+    textPrompt += `BRAND LOGO: The next image is the brand logo. Integrate it subtly into the creative.\n\n`;
+  }
+  if (refsToSend.length > 0) {
+    textPrompt += `REFERENCE CREATIVES: The last ${refsToSend.length} image(s) are existing brand ads. MATCH their visual style, color palette, mood, and composition approach.\n\n`;
+  }
+  if (styleGuide) {
+    textPrompt += `BRAND STYLE GUIDE:\n${styleGuide}\n\n`;
+  }
+  textPrompt += `CREATIVE BRIEF: ${prompt}\n\n`;
+  textPrompt += `CRITICAL: Generate a unique, scroll-stopping ad creative. Preserve the product design exactly. Match the brand style. Include the logo. Photorealistic 8K quality. No artifacts. Make it premium and professional.`;
+
+  parts.push({ text: textPrompt });
+
+  const modelsToTry = [
+    'gemini-3-pro-image-preview',
+    'gemini-2.5-flash-image'
+  ];
+
+  const maxRetriesPerModel = 2;
+
+  for (const modelName of modelsToTry) {
+    console.log(`🔄 [generateGoomCreative] Trying model: ${modelName}`);
+
+    for (let attempt = 1; attempt <= maxRetriesPerModel; attempt++) {
+      try {
+        const response = await ai.models.generateContent({
+          model: modelName,
+          contents: { parts },
+          config: {
+            systemInstruction: GOOM_SYSTEM_PROMPT,
+            responseModalities: ['TEXT', 'IMAGE'],
+            imageConfig: {
+              aspectRatio,
+              imageSize: '2K'
+            },
+          },
+        });
+
+        let imageUrl = '';
+        if (response.candidates?.[0]?.content) {
+          for (const part of response.candidates[0].content.parts) {
+            if (part.inlineData) {
+              imageUrl = `data:image/png;base64,${part.inlineData.data}`;
+              console.log('🎉 [generateGoomCreative] Image generated successfully!');
+              break;
+            }
+          }
+        }
+
+        if (imageUrl) return imageUrl;
+        throw new Error('No image in response');
+
+      } catch (error: any) {
+        const errorMessage = error?.message || String(error);
+        const isOverloaded = errorMessage.includes('503') ||
+          errorMessage.includes('overloaded') ||
+          errorMessage.includes('UNAVAILABLE') ||
+          errorMessage.includes('Resource exhausted');
+
+        console.error(`💥 [generateGoomCreative] Error (attempt ${attempt}):`, errorMessage);
+
+        if (isOverloaded && attempt < maxRetriesPerModel) {
+          await delay(attempt * 1500);
+          continue;
+        }
+
+        if (isOverloaded) break;
+        if (modelName !== modelsToTry[0]) throw error;
+        break;
+      }
+    }
+  }
+
+  throw new Error('GOOM creative generation failed. Please try again.');
+};
+
+/**
+ * Generate multiple GOOM creatives with controlled concurrency.
+ * Returns an array of results (base64 image or error string) matching the input indices.
+ */
+export const generateGoomCreativesBatch = async (
+  items: {
+    prompt: string;
+    productImages: string[];
+    aspectRatio: AspectRatio;
+  }[],
+  logoBase64: string | null,
+  referenceCreatives: string[],
+  styleGuide: string,
+  concurrency: number = 3,
+  onProgress?: (index: number, status: 'start' | 'done' | 'error', result?: string) => void
+): Promise<(string | null)[]> => {
+  const results: (string | null)[] = new Array(items.length).fill(null);
+  let nextIndex = 0;
+
+  const worker = async () => {
+    while (nextIndex < items.length) {
+      const idx = nextIndex++;
+      const item = items[idx];
+
+      onProgress?.(idx, 'start');
+
+      try {
+        const result = await generateGoomCreative(
+          item.prompt,
+          item.productImages,
+          logoBase64,
+          referenceCreatives,
+          item.aspectRatio,
+          styleGuide
+        );
+        results[idx] = result;
+        onProgress?.(idx, 'done', result);
+      } catch (error: any) {
+        console.error(`❌ [generateGoomCreativesBatch] Item ${idx} failed:`, error?.message);
+        results[idx] = null;
+        onProgress?.(idx, 'error');
+      }
+    }
+  };
+
+  // Launch workers
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, () => worker());
+  await Promise.all(workers);
+
+  return results;
 };

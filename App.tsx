@@ -7,6 +7,7 @@ import { trackImageGeneration, isAdminUser } from './services/adminService';
 import { Auth } from './components/Auth';
 import { Feedback } from './components/Feedback';
 import AdminView from './components/AdminView';
+import GoomView from './components/GoomView';
 import { Session } from '@supabase/supabase-js';
 import {
   Send,
@@ -36,7 +37,8 @@ import {
   Redo2,
   ChevronDown,
   Pencil,
-  Check
+  Check,
+  ImagePlus
 } from 'lucide-react';
 
 // Fix: Use explicit global declaration for aistudio to avoid type conflicts and resolve Blob error
@@ -50,7 +52,7 @@ declare global {
   }
 }
 
-type View = 'workspace' | 'gallery' | 'settings' | 'feedback' | 'banners' | 'refcopy' | 'editor' | 'admin';
+type View = 'workspace' | 'gallery' | 'settings' | 'feedback' | 'goom' | 'banners' | 'refcopy' | 'editor' | 'admin';
 
 const App: React.FC = () => {
   const [session, setSession] = useState<Session | null>(null);
@@ -134,6 +136,7 @@ const App: React.FC = () => {
   // Editor-specific state
   const [editorImage916, setEditorImage916] = useState<string | null>(null);
   const [editorImage11, setEditorImage11] = useState<string | null>(null);
+  const [editorReferenceImage, setEditorReferenceImage] = useState<string | null>(null);
   const [showBrushModal, setShowBrushModal] = useState(false);
   const [brushSize, setBrushSize] = useState(30);
   const [mask916Data, setMask916Data] = useState<string | null>(null);
@@ -145,6 +148,7 @@ const App: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const editorInput916Ref = useRef<HTMLInputElement>(null);
   const editorInput11Ref = useRef<HTMLInputElement>(null);
+  const editorReferenceInputRef = useRef<HTMLInputElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
 
@@ -289,6 +293,19 @@ const App: React.FC = () => {
     e.target.value = '';
   };
 
+  // Editor reference image handler (for object replacement)
+  const handleEditorReferenceChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const base64 = reader.result as string;
+      setEditorReferenceImage(base64);
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
   // Editor generate function
   const handleEditorGenerate = async () => {
     if (!editorPrompt.trim() || isEditorProcessing) return;
@@ -304,12 +321,13 @@ const App: React.FC = () => {
         const optimizedPrompt916 = await optimizeEditorPrompt(
           editorPrompt,
           editorImage916,
-          mask916Data
+          mask916Data,
+          editorReferenceImage
         );
         console.log('📝 Optimized 9:16 prompt:', optimizedPrompt916);
 
         setEditorStatus('Generando imagen 9:16...');
-        const result916 = await generateEditorImage(optimizedPrompt916, editorImage916, '9:16');
+        const result916 = await generateEditorImage(optimizedPrompt916, editorImage916, '9:16', editorReferenceImage);
         setEditorResult916(result916);
         if (session?.user?.id) trackImageGeneration(session.user.id, 'editor');
         // Add to RESULT history for undo/redo
@@ -323,12 +341,13 @@ const App: React.FC = () => {
         const optimizedPrompt11 = await optimizeEditorPrompt(
           editorPrompt,
           editorImage11,
-          mask11Data
+          mask11Data,
+          editorReferenceImage
         );
         console.log('📝 Optimized 1:1 prompt:', optimizedPrompt11);
 
         setEditorStatus('Generando imagen 1:1...');
-        const result11 = await generateEditorImage(optimizedPrompt11, editorImage11, '1:1');
+        const result11 = await generateEditorImage(optimizedPrompt11, editorImage11, '1:1', editorReferenceImage);
         setEditorResult11(result11);
         if (session?.user?.id) trackImageGeneration(session.user.id, 'editor');
         // Add to RESULT history for undo/redo
@@ -343,6 +362,7 @@ const App: React.FC = () => {
       setEditorImage11(null);
       setMask916Data(null);
       setMask11Data(null);
+      setEditorReferenceImage(null);
     } catch (error: any) {
       console.error('❌ Editor generation failed:', error);
       setEditorStatus(`Error: ${error?.message || 'Unknown error'}`);
@@ -432,6 +452,8 @@ const App: React.FC = () => {
     // Clear masks
     setMask916Data(null);
     setMask11Data(null);
+    // Clear reference image
+    setEditorReferenceImage(null);
     // Clear prompt
     setEditorPrompt('');
     // Clear result history
@@ -1229,6 +1251,15 @@ DO NOT change the subject, colors, or style. Only adapt the composition for vert
 
           <div className="flex-1 flex flex-col justify-end p-4 gap-2">
             <button
+              onClick={() => setCurrentView('goom')}
+              className={`flex items-center gap-3 px-4 py-4 rounded-2xl transition-all font-bold text-[11px] uppercase tracking-tight group ${currentView === 'goom' ? 'bg-white text-black shadow-lg' : 'hover:bg-white/5 text-gray-400'
+                }`}
+            >
+              <Sparkles className="w-6 h-6 shrink-0" />
+              <span className="hidden lg:block">GOOM</span>
+            </button>
+
+            <button
               onClick={() => setCurrentView('banners')}
               className={`flex items-center gap-3 px-4 py-4 rounded-2xl transition-all font-bold text-[11px] uppercase tracking-tight group ${currentView === 'banners' ? 'bg-white text-black shadow-lg' : 'hover:bg-white/5 text-gray-400'
                 }`}
@@ -1512,6 +1543,8 @@ DO NOT change the subject, colors, or style. Only adapt the composition for vert
                       <Plus className="w-3.5 h-3.5" />
                     </button>
                   </div>
+
+
                   <div className="relative border border-white/10 rounded-xl bg-[#0a0a0a]/50 h-[200px] flex flex-col">
                     <textarea
                       value={inputText}
@@ -1729,6 +1762,10 @@ DO NOT change the subject, colors, or style. Only adapt the composition for vert
               </div>
             );
           })()}
+          {/* VIEW: GOOM */}
+          {currentView === 'goom' && session && (
+            <GoomView session={session} />
+          )}
           {/* VIEW: BANNERS */}
           {currentView === 'banners' && (
             <div className="h-full flex gap-4 p-4 overflow-hidden">
@@ -2310,6 +2347,7 @@ DO NOT change the subject, colors, or style. Only adapt the composition for vert
               {/* Hidden file inputs for Editor */}
               <input type="file" ref={editorInput916Ref} onChange={handleEditor916Change} className="hidden" accept="image/*" />
               <input type="file" ref={editorInput11Ref} onChange={handleEditor11Change} className="hidden" accept="image/*" />
+              <input type="file" ref={editorReferenceInputRef} onChange={handleEditorReferenceChange} className="hidden" accept="image/*" />
               {/* Hidden file inputs for Format */}
               <input type="file" ref={formatInput916Ref} onChange={handleFormatInput916Change} className="hidden" accept="image/*" />
               <input type="file" ref={formatInput11Ref} onChange={handleFormatInput11Change} className="hidden" accept="image/*" />
@@ -2761,6 +2799,34 @@ DO NOT change the subject, colors, or style. Only adapt the composition for vert
                           {(mask916Data || mask11Data) && (
                             <span className="text-[8px] text-green-400 font-bold uppercase">Máscara ✓</span>
                           )}
+                          {editorReferenceImage && (
+                            <span className="text-[8px] text-blue-400 font-bold uppercase">Ref ✓</span>
+                          )}
+                          {/* Reference image upload button */}
+                          <div className="relative group">
+                            <button
+                              onClick={() => editorReferenceInputRef.current?.click()}
+                              className={`p-2 border border-white/20 rounded-lg transition-colors group ${editorReferenceImage
+                                ? 'bg-blue-500/20 border-blue-500/40 hover:bg-blue-500/30'
+                                : 'bg-white/5 hover:bg-white/10 cursor-pointer'
+                                }`}
+                              title="Añadir imagen de referencia (objeto a insertar)"
+                            >
+                              <ImagePlus className="w-4 h-4 text-gray-500 group-hover:text-white transition-colors" />
+                            </button>
+                            {editorReferenceImage && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditorReferenceImage(null);
+                                }}
+                                className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center text-white hover:bg-red-400 transition-colors"
+                              >
+                                <X className="w-2.5 h-2.5" />
+                              </button>
+                            )}
+                          </div>
+                          {/* Brush/mask button */}
                           <button
                             onClick={() => {
                               if (editorImage916 || editorImage11) {

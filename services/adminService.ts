@@ -13,7 +13,7 @@ export interface UserStat {
     lastActivity: string | null;
 }
 
-export type GenerationSection = 'generator' | 'editor' | 'formats' | 'refcopy' | 'banners' | 'fashion';
+export type GenerationSection = 'generator' | 'editor' | 'formats' | 'refcopy' | 'banners' | 'fashion' | 'goom';
 
 export interface DateRange {
     from: string | null; // ISO string
