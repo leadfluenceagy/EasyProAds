@@ -270,8 +270,8 @@ export const generateImage = async (prompt: string, aspectRatio: AspectRatio, re
 
   // Models to try in order of preference
   const modelsToTry = [
-    'gemini-2.5-flash-image',
-    'gemini-3.1-flash-image-preview'
+    'gemini-3-pro-image-preview',
+    'gemini-2.5-flash-image'
   ];
 
   const maxRetriesPerModel = 3;
@@ -504,8 +504,8 @@ export const generateEditorImage = async (
   }
 
   const modelsToTry = [
-    'gemini-2.5-flash-image',
-    'gemini-3.1-flash-image-preview'
+    'gemini-3-pro-image-preview',
+    'gemini-2.5-flash-image'
   ];
 
   const maxRetriesPerModel = 3;
@@ -640,8 +640,8 @@ export const generateFormatImage = async (
   ];
 
   const modelsToTry = [
-    'gemini-2.5-flash-image',
-    'gemini-3.1-flash-image-preview'
+    'gemini-3-pro-image-preview',
+    'gemini-2.5-flash-image'
   ];
 
   const maxRetriesPerModel = 3;
@@ -835,8 +835,8 @@ export const generateRefCopyImage = async (
   ];
 
   const modelsToTry = [
-    'gemini-2.5-flash-image',
-    'gemini-3.1-flash-image-preview'
+    'gemini-3-pro-image-preview',
+    'gemini-2.5-flash-image'
   ];
 
   const maxRetriesPerModel = 3;
@@ -1014,8 +1014,8 @@ export const generateGoomCreative = async (
   parts.push({ text: textPrompt });
 
   const modelsToTry = [
-    'gemini-2.5-flash-image',
-    'gemini-3.1-flash-image-preview'
+    'gemini-3-pro-image-preview',
+    'gemini-2.5-flash-image'
   ];
 
   const maxRetriesPerModel = 3;
