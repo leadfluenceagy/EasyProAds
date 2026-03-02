@@ -270,11 +270,12 @@ export const generateImage = async (prompt: string, aspectRatio: AspectRatio, re
 
   // Models to try in order of preference
   const modelsToTry = [
-    'gemini-3-pro-image-preview',
-    'gemini-2.5-flash-image'
+    'gemini-3.1-pro-image-preview',
+    'gemini-3.1-flash-image-preview'
   ];
 
-  const maxRetriesPerModel = 2;
+  const maxRetriesPerModel = 3;
+  const retryWaitTimes = [1000, 2000, 4000];
 
   for (const modelName of modelsToTry) {
     console.log(`\n🔄 [generateImage] === Trying model: ${modelName} ===`);
@@ -329,7 +330,7 @@ export const generateImage = async (prompt: string, aspectRatio: AspectRatio, re
         console.error(`💥 [generateImage] Error with ${modelName} (attempt ${attempt}):`, errorMessage);
 
         if (isOverloaded && attempt < maxRetriesPerModel) {
-          const waitTime = attempt * 1000; // 1s, 2s
+          const waitTime = retryWaitTimes[attempt - 1];
           console.log(`⏳ [generateImage] Model overloaded, waiting ${waitTime / 1000}s before retry...`);
           await delay(waitTime);
           continue;
@@ -503,11 +504,12 @@ export const generateEditorImage = async (
   }
 
   const modelsToTry = [
-    'gemini-3-pro-image-preview',
-    'gemini-2.5-flash-image'
+    'gemini-3.1-pro-image-preview',
+    'gemini-3.1-flash-image-preview'
   ];
 
-  const maxRetriesPerModel = 2;
+  const maxRetriesPerModel = 3;
+  const retryWaitTimes = [1000, 2000, 4000];
   const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
   for (const modelName of modelsToTry) {
@@ -550,7 +552,7 @@ export const generateEditorImage = async (
         console.error(`💥 [generateEditorImage] Error (attempt ${attempt}):`, errorMessage);
 
         if (isOverloaded && attempt < maxRetriesPerModel) {
-          await delay(attempt * 1000);
+          await delay(retryWaitTimes[attempt - 1]);
           continue;
         }
 
@@ -638,11 +640,12 @@ export const generateFormatImage = async (
   ];
 
   const modelsToTry = [
-    'gemini-3-pro-image-preview',
-    'gemini-2.5-flash-image'
+    'gemini-3.1-pro-image-preview',
+    'gemini-3.1-flash-image-preview'
   ];
 
-  const maxRetriesPerModel = 2;
+  const maxRetriesPerModel = 3;
+  const retryWaitTimes = [1000, 2000, 4000];
   const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
   for (const modelName of modelsToTry) {
@@ -685,7 +688,7 @@ export const generateFormatImage = async (
         console.error(`💥 [generateFormatImage] Error (attempt ${attempt}):`, errorMessage);
 
         if (isOverloaded && attempt < maxRetriesPerModel) {
-          await delay(attempt * 1000);
+          await delay(retryWaitTimes[attempt - 1]);
           continue;
         }
 
@@ -832,11 +835,12 @@ export const generateRefCopyImage = async (
   ];
 
   const modelsToTry = [
-    'gemini-3-pro-image-preview',
-    'gemini-2.5-flash-image'
+    'gemini-3.1-pro-image-preview',
+    'gemini-3.1-flash-image-preview'
   ];
 
-  const maxRetriesPerModel = 2;
+  const maxRetriesPerModel = 3;
+  const retryWaitTimes = [1000, 2000, 4000];
   const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
   for (const modelName of modelsToTry) {
@@ -879,7 +883,7 @@ export const generateRefCopyImage = async (
         console.error(`💥 [generateRefCopyImage] Error (attempt ${attempt}):`, errorMessage);
 
         if (isOverloaded && attempt < maxRetriesPerModel) {
-          await delay(attempt * 1000);
+          await delay(retryWaitTimes[attempt - 1]);
           continue;
         }
 
@@ -1010,11 +1014,12 @@ export const generateGoomCreative = async (
   parts.push({ text: textPrompt });
 
   const modelsToTry = [
-    'gemini-3-pro-image-preview',
-    'gemini-2.5-flash-image'
+    'gemini-3.1-pro-image-preview',
+    'gemini-3.1-flash-image-preview'
   ];
 
-  const maxRetriesPerModel = 2;
+  const maxRetriesPerModel = 3;
+  const retryWaitTimes = [1000, 2000, 4000];
 
   for (const modelName of modelsToTry) {
     console.log(`🔄 [generateGoomCreative] Trying model: ${modelName}`);
@@ -1058,7 +1063,7 @@ export const generateGoomCreative = async (
         console.error(`💥 [generateGoomCreative] Error (attempt ${attempt}):`, errorMessage);
 
         if (isOverloaded && attempt < maxRetriesPerModel) {
-          await delay(attempt * 1500);
+          await delay(retryWaitTimes[attempt - 1]);
           continue;
         }
 
