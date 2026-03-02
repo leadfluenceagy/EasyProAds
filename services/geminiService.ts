@@ -270,7 +270,7 @@ export const generateImage = async (prompt: string, aspectRatio: AspectRatio, re
 
   // Models to try in order of preference
   const modelsToTry = [
-    'gemini-3-pro-image-preview',
+    'gemini-2.5-flash-image',
     'gemini-3.1-flash-image-preview'
   ];
 
@@ -504,7 +504,7 @@ export const generateEditorImage = async (
   }
 
   const modelsToTry = [
-    'gemini-3-pro-image-preview',
+    'gemini-2.5-flash-image',
     'gemini-3.1-flash-image-preview'
   ];
 
@@ -640,7 +640,7 @@ export const generateFormatImage = async (
   ];
 
   const modelsToTry = [
-    'gemini-3-pro-image-preview',
+    'gemini-2.5-flash-image',
     'gemini-3.1-flash-image-preview'
   ];
 
@@ -835,7 +835,7 @@ export const generateRefCopyImage = async (
   ];
 
   const modelsToTry = [
-    'gemini-3-pro-image-preview',
+    'gemini-2.5-flash-image',
     'gemini-3.1-flash-image-preview'
   ];
 
@@ -1014,7 +1014,7 @@ export const generateGoomCreative = async (
   parts.push({ text: textPrompt });
 
   const modelsToTry = [
-    'gemini-3-pro-image-preview',
+    'gemini-2.5-flash-image',
     'gemini-3.1-flash-image-preview'
   ];
 
