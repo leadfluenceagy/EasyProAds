@@ -910,9 +910,28 @@ DO NOT change the subject, colors, or style. Only adapt the composition for vert
     setIsProcessing(true);
 
     try {
-      console.log('Starting prompt optimization...', { query, mode: currentMode, imageCount: currentImgs.length });
-      const optimizedPrompt = await professionalizePrompt(query, currentMode, currentImgs);
-      console.log('Prompt optimized:', optimizedPrompt.substring(0, 100) + '...');
+      console.log('Starting generation...', { query, mode: currentMode, imageCount: currentImgs.length });
+
+      let optimizedPrompt: string;
+
+      // When product images are provided in generator mode, pass them DIRECTLY to the
+      // image model — skip the text-description step entirely so the model uses the
+      // actual pixels, not an approximation.
+      const hasProductImages = currentImgs.length > 0 && currentMode === 'generator';
+
+      if (hasProductImages) {
+        // Build a minimal but precise wrapper around the user's intent.
+        // The real "description" of the product is the image itself.
+        const sceneIntent = query.trim()
+          ? `Place this exact product in the following scene: ${query.trim()}.`
+          : 'Place this exact product in a natural, realistic commercial environment that suits the product.';
+
+        optimizedPrompt = `${sceneIntent} The product from the reference image must appear EXACTLY as shown — reproduce every color, finish, logo, label, and structural detail with 100% fidelity. Do NOT recolor, redesign, or reinterpret any aspect of the product's appearance. You may naturally reposition or slightly rotate the product to suit the composition. Photorealistic quality, natural lighting that fits the scene, no text overlays, no artifacts.`;
+        console.log('📸 [handleSend] Product image detected — using direct-image prompt (no professionalizePrompt step)');
+      } else {
+        optimizedPrompt = await professionalizePrompt(query, currentMode, currentImgs);
+        console.log('Prompt optimized:', optimizedPrompt.substring(0, 100) + '...');
+      }
 
       // Save the last prompt for 1:1 generation
       setLastPrompt(optimizedPrompt);

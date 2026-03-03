@@ -2,27 +2,47 @@ import { GoogleGenAI, Part } from "@google/genai";
 import { AspectRatio, ChatMode } from "../types";
 
 const GENERATOR_PROMPT = `
-You are an elite Visual Strategist for high-end commercial advertising.
+You are a professional Commercial Photography Director and Prompt Engineer.
 
-PRODUCT DESIGN PRESERVATION RULE:
-The product/object from the reference image MUST maintain its EXACT DESIGN:
-- EXACT same colors, textures, and materials
-- EXACT same logos, labels, patterns, and all visual details
-- EXACT same proportions and scale relative to itself
-- DO NOT modify, improve, recolor, or redesign the product
+YOUR PRIMARY ROLE:
+Analyse the reference product image with forensic precision, then write a single hyper-detailed English prompt that will instruct an AI image-generation model to produce a photorealistic image featuring that EXACT product in a realistic environment that suits the user's request.
 
-WHAT YOU CAN CHANGE:
-- Product POSITION in the scene (angle, rotation, tilt, orientation)
-- Product PLACEMENT (where it sits in the composition)
-- Environment, background, lighting, shadows, reflections
+══════════════════════════════════════
+PRODUCT FIDELITY — NON-NEGOTIABLE RULES
+══════════════════════════════════════
+- The product's ENTIRE visual identity is SACRED and must be reproduced pixel-perfectly:
+  • EXACT colors (describe each in terms like "deep crimson #8B0000", "brushed titanium silver", etc.)
+  • EXACT material finish (glossy, matte, frosted, metallic, fabric weave, leather grain, etc.)
+  • EXACT logos, wordmarks, labels, barcodes, icons — reproduce ALL readable text verbatim
+  • EXACT shape, silhouette, proportions, and structural details
+  • EXACT patterns, gradients, decals, stitching, engraving, embossing
+- You MAY naturally reposition the product (slight rotation, tilt, elevated angle, dynamic lean) to suit the scene, but its design must remain UNCHANGED.
+- NEVER recolor, reimagine, simplify, improve, or reinterpret the product's appearance.
 
-WHAT YOU CANNOT CHANGE:
-- Any aspect of the product's actual DESIGN or APPEARANCE
-- Colors, logos, textures, patterns, labels, or visual details of the product
+══════════════════════════════════════
+PHOTOREALISM QUALITY RULES
+══════════════════════════════════════
+- The image must look like a real photograph taken by a professional photographer — not a render, not an illustration.
+- Lens: 85mm or 100mm macro, f/2.8–f/4, razor-sharp product focus with natural background separation
+- Lighting: describe exact lighting setup (e.g. "natural window light from the left, soft diffused, warm 5600K; subtle fill light"), generating realistic specular highlights and cast shadows that anchor the product to the surface
+- Environment must feel REAL — tangible textures, believable depth, natural perspective
+- Match the STYLE to the user's request: if the user asks for lifestyle, use natural environment; if they ask for studio, use clean backdrop; ONLY use luxury/premium settings if the user explicitly requests it.
+- NO studio equipment visible unless it is a styled choice
+- NO text, NO watermarks, NO captions in the final scene (product labels/logos are the only text allowed)
+- NO obvious CGI tells, NO plastic-looking surfaces (unless the product itself is plastic), NO floating objects without shadows
 
-YOUR JOB: Place this product (with unchanged design) in an appropriate, stunning environment. You may reposition/rotate the product naturally in the scene.
+══════════════════════════════════════
+OUTPUT FORMAT — HOW TO WRITE THE PROMPT
+══════════════════════════════════════
+Write ONE single cohesive prompt in English structured as:
+1. [PRODUCT DESCRIPTION] — forensic description: name every color, finish, logo, label, text, shape detail
+2. [SCENE & ENVIRONMENT] — specific setting that matches the user's intent, surfaces, props, atmosphere, time of day
+3. [LIGHTING] — exact lighting setup, direction, temperature, quality (hard/soft), specular behavior
+4. [CAMERA] — lens, focal length, aperture, depth of field, angle
+5. [MOOD & STYLE] — mood and style that matches the user's request (realistic, lifestyle, commercial, luxury only if requested, etc.)
+6. [PRESERVATION REMINDER] — end with: "The product must appear EXACTLY as described — same colors, logos, finish, and design. Do NOT alter any aspect of the product's appearance."
 
-STRICT VISUAL CONSTRAINTS: NO studio gear visible, luxury environments preferred, cinematic lighting, NO TEXT anywhere.
+Do NOT output explanations, headings, or bullet lists. Output ONLY the final prompt as continuous prose.
 `;
 
 const ITERATION_PROMPT = `
@@ -146,30 +166,34 @@ export const professionalizePrompt = async (input: string, mode: ChatMode, image
   // Enhanced instruction when images are present
   const hasImages = imagesBase64.length > 0;
   const imageAnalysisInstruction = hasImages
-    ? `\n\nCRITICAL IMAGE ANALYSIS - PRODUCT DESIGN PRESERVATION:
-You are analyzing ${imagesBase64.length} reference image(s) containing a PRODUCT whose DESIGN must be preserved exactly.
+    ? `\n\n════════════════════════════════════════════════
+FORENSIC PRODUCT ANALYSIS — MANDATORY BEFORE WRITING THE PROMPT
+════════════════════════════════════════════════
+You are analyzing ${imagesBase64.length} reference image(s). Before writing a single word of the final prompt, perform these analysis steps internally:
 
-STEP 1 - DOCUMENT THE PRODUCT DESIGN:
-- Note EVERY color with precision (hex codes preferred)
-- Document ALL visible logos, labels, text, patterns, and design details
-- Describe materials and textures (glossy, matte, metallic, fabric type, etc.)
-- These design elements CANNOT change
+[A] PRODUCT IDENTITY FORENSICS:
+  • Brand name and product name (read every piece of text/logo visible)
+  • Primary body color(s) — use precise descriptors: "matte obsidian black", "pearl white #F8F8FF", "rose gold metallic", etc.
+  • Secondary colors (accents, trims, labels, caps, buttons)
+  • Material finish for every surface: glossy, satin, matte, frosted, brushed metal, chrome, leather, fabric, paper, etc.
+  • Every logo, wordmark, icon, label, and piece of printed text — transcribe verbatim
+  • Structural details: shape, edges (sharp/rounded), surface geometry, cutouts, openings, components
+  • Patterns, gradients, textures, stitching, embossing, engraving
+  • Size/proportion relationships between parts
 
-STEP 2 - UNDERSTAND WHAT CAN CHANGE:
-- Product POSITION: Can be rotated, tilted, angled differently
-- Product PLACEMENT: Can be positioned anywhere in the scene
-- ENVIRONMENT: Can be completely changed
+[B] WHAT THE GENERATION MODEL MAY DO:
+  • Reposition the product naturally (rotate slightly, tilt, elevate, lean)
+  • Place the product in a completely different environment
+  • Change all lighting, shadows, reflections to suit the new scene
 
-STEP 3 - UNDERSTAND WHAT CANNOT CHANGE:
-- Product DESIGN: Colors, logos, textures, patterns, labels
-- Product APPEARANCE: Must look identical, just from a different angle/position if needed
+[C] WHAT THE GENERATION MODEL MUST NEVER DO:
+  • Change any color, even slightly
+  • Alter, simplify, hide, or reinterpret any logo, label, or text
+  • Change the material finish or surface texture
+  • Modify the shape, proportions, or structural details
+  • Add, remove, or redesign any component of the product
 
-OUTPUT FORMAT:
-Generate a prompt that:
-1. Describes the product design in extreme detail (colors, logos, textures, materials)
-2. Emphasizes "PRESERVE EXACT PRODUCT DESIGN - same colors, logos, textures"
-3. Describes the new environment/scene
-4. Allows natural repositioning of the product in the scene`
+USING YOUR FORENSIC ANALYSIS, now write a single, continuous English prose prompt following the structure defined in your system instructions. The product description section must be exhaustively detailed — include every color code, finish, logo text, and structural element you documented above. This is NON-NEGOTIABLE.`
     : '';
 
   const parts: Part[] = [
@@ -264,7 +288,15 @@ export const generateImage = async (prompt: string, aspectRatio: AspectRatio, re
     });
   });
 
-  parts.push({ text: "CRITICAL REQUIREMENTS: 1) PRESERVE EXACT PRODUCT DESIGN - same colors, logos, textures, patterns, and all visual details from reference. 2) You MAY reposition the product naturally in the scene (rotate, tilt, angle). 3) Create a stunning environment around the product. 4) Photorealistic 8K quality. 5) No text overlays. 6) No artifacts." });
+  parts.push({
+    text: `ABSOLUTE CRITICAL REQUIREMENTS — THESE OVERRIDE EVERYTHING ELSE:
+1. PRODUCT DESIGN IS SACRED: Reproduce the product from the reference image with 100% fidelity — identical colors (every single one), identical material finishes (glossy/matte/metallic/etc.), identical logos and label text (exact same words, font weight, position), identical shape and proportions. ANY deviation from the reference product's appearance is a FAILURE.
+2. PHOTOREALISM: This must look like a real photograph taken by a professional photographer — not a render, not a CGI composite, not an illustration.
+3. PRODUCT REPOSITIONING ONLY: You may naturally reposition or slightly rotate the product to suit the scene composition. The product's DESIGN stays 100% unchanged.
+4. REALISTIC ENVIRONMENT: Create an environment that feels natural and believable with realistic lighting, surfaces, depth of field, and atmospheric detail. The style (lifestyle, studio, outdoor, luxury, etc.) must match what was requested — do NOT default to luxury unless explicitly asked.
+5. NO TEXT in the background environment (product logos/labels are the only text permitted).
+6. ZERO ARTIFACTS: No seams, no floating elements, no incorrect reflections, no distorted product geometry.
+7. If provided with a reference image of the product, that product MUST appear EXACTLY as shown — same colors, same logos, same finish. Failure to replicate it exactly is unacceptable.` });
 
   console.log('🎯 [generateImage] Total parts to send:', parts.length);
 
